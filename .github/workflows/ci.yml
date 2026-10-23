@@ -1,0 +1,25 @@
+name: Windows build and checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test with Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/Test.ps1
+      - name: Package
+        shell: powershell
+        run: ./scripts/Package.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-voice-key-windows-x64
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt

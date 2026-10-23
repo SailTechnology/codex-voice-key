@@ -1,0 +1,17 @@
+bin/
+dist/
+.test-work/
+config.json
+diagnostics.json
+installation.json
+recordings/
+*.wav
+*.gguf
+*.log
+*.old
+*.partial
+*.previous
+*.exe
+*.zip
+__pycache__/
+.DS_Store

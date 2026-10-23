@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Voice Key"
+  short_description: "Install local voice input with custom keys on Windows"
+  default_prompt: "使用 $codex-voice-key 为我的 Windows Codex 安装本地语音输入，并配置我指定的按键。"
