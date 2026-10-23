@@ -13,8 +13,9 @@ namespace CodexVoiceKey
             if (!condition) throw new Exception(message);
             count++;
         }
-        private static int Main()
+        private static int Main(string[] args)
         {
+            if (Array.IndexOf(args, "--fake-asr-worker") >= 0) return ResidentTests.FakeWorker();
             try
             {
                 HotkeyBinding ctrlB = HotkeyBinding.Parse("Ctrl+B");
@@ -83,6 +84,19 @@ namespace CodexVoiceKey
                 bool silent = true; foreach (byte sample in mono) if (sample != 0) silent = false;
                 Check(silent, "Both input channels are mixed with correct frame alignment");
                 Check(PcmWave.Resample(new byte[0], 44100, 2).Length == 0, "Empty capture is valid empty PCM");
+                // Integer multiplication overflow used to reject recordings
+                // longer than 8.4 s at 16 kHz, or 2.8 s at 48 kHz.
+                foreach (int rate in new int[] { 16000, 44100, 48000 })
+                {
+                    foreach (int seconds in new int[] { 20, 120 })
+                    {
+                        byte[] longAudio = new byte[rate * seconds * 2];
+                        for (int i = 0; i < longAudio.Length; i += 2) { longAudio[i] = 0xD2; longAudio[i + 1] = 0x04; }
+                        byte[] converted = PcmWave.Resample(longAudio, rate, 1);
+                        Check(converted.Length == seconds * 16000 * 2, seconds + "-second recording keeps its duration at " + rate + " Hz");
+                        Check(BitConverter.ToInt16(converted, converted.Length - 2) == 1234, "Long recording retains its last sample without integer overflow at " + rate + " Hz");
+                    }
+                }
                 string temp = Path.Combine(Path.GetTempPath(), "codex-voice-test-" + Guid.NewGuid().ToString("N") + ".wav");
                 try
                 {
@@ -90,8 +104,20 @@ namespace CodexVoiceKey
                     byte[] wav = File.ReadAllBytes(temp);
                     Check(wav.Length == 32044 && Encoding.ASCII.GetString(wav, 0, 4) == "RIFF", "Valid WAV container and duration");
                     Check(BitConverter.ToInt16(wav, 22) == 1 && BitConverter.ToInt32(wav, 24) == 16000, "WAV declares mono 16 kHz");
+                    float[] nativeSamples = NativeTranscriber.ReadWave(temp);
+                    Check(nativeSamples.Length == 16000 && nativeSamples[100] == 0, "Native reader preserves PCM duration and channel mix");
+                    wav[22] = 2;
+                    File.WriteAllBytes(temp, wav);
+                    bool invalidAudio = false;
+                    try { NativeTranscriber.ReadWave(temp); } catch (InvalidDataException) { invalidAudio = true; }
+                    Check(invalidAudio, "Reject stereo WAV instead of transcribing with wrong timing");
+                    File.WriteAllBytes(temp, new byte[] { 1, 2, 3 });
+                    invalidAudio = false;
+                    try { NativeTranscriber.ReadWave(temp); } catch (InvalidDataException) { invalidAudio = true; }
+                    Check(invalidAudio, "Reject malformed WAV without native access");
                 }
                 finally { File.Delete(temp); }
+                ResidentTests.Run(Check);
                 Console.WriteLine("PASS: " + count + " input, modifier, JSON, ABI and audio checks (no system input injected).");
                 return 0;
             }

@@ -1,4 +1,4 @@
-﻿param([string]$Version = '1.0.1')
+﻿param([string]$Version = '1.1.0')
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 & (Join-Path $PSScriptRoot 'build.ps1') | Out-Host
@@ -8,7 +8,7 @@ if (-not $staging.StartsWith([IO.Path]::GetFullPath($distribution).TrimEnd('\') 
 if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
 $appStage = Join-Path $staging 'CodexVoiceKey'
 New-Item -ItemType Directory -Path $appStage -Force | Out-Null
-foreach ($folder in @('bin','src','assets','scripts','skills','docs')) { Copy-Item -LiteralPath (Join-Path $repoRoot $folder) -Destination (Join-Path $appStage $folder) -Recurse }
+foreach ($folder in @('bin','src','assets','scripts','skills','docs','tests')) { Copy-Item -LiteralPath (Join-Path $repoRoot $folder) -Destination (Join-Path $appStage $folder) -Recurse }
 foreach ($file in @('README.md','LICENSE','THIRD_PARTY_NOTICES.md','config.example.json','Install.cmd')) { Copy-Item -LiteralPath (Join-Path $repoRoot $file) -Destination (Join-Path $appStage $file) }
 [IO.File]::WriteAllText((Join-Path $appStage 'VERSION'), $Version)
 $appZip = Join-Path $distribution 'codex-voice-key-windows-x64.zip'

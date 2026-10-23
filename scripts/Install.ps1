@@ -21,7 +21,13 @@ if ($Hotkey) {
 }
 New-Item -ItemType Directory -Path $InstallDirectory -Force | Out-Null
 $configPath = Join-Path $InstallDirectory 'config.json'
-$settings = if (Test-Path -LiteralPath $configPath) { Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { Get-Content -LiteralPath (Join-Path $repoRoot 'config.example.json') -Raw -Encoding UTF8 | ConvertFrom-Json }
+$defaults = Get-Content -LiteralPath (Join-Path $repoRoot 'config.example.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$settings = if (Test-Path -LiteralPath $configPath) { Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $defaults }
+foreach ($property in $defaults.PSObject.Properties) {
+    if ($null -eq $settings.PSObject.Properties[$property.Name]) {
+        $settings | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+    }
+}
 if ($Hotkey) { $settings.Hotkey = $Hotkey }
 if ($HandyPath) { $settings.HandyPath = [IO.Path]::GetFullPath($HandyPath) }
 if (-not $SkipBackend) {
@@ -56,7 +62,7 @@ if (-not $NoSkill) {
     Copy-Item -Path (Join-Path $repoRoot 'skills\codex-voice-key\*') -Destination $skillDestination -Recurse -Force
 }
 Write-VoiceJson -Path (Join-Path $InstallDirectory 'installation.json') -Value ([ordered]@{
-    version='1.0.1'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
+    version='1.1.0'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
 })
 if (-not $NoStart) { Write-Host ('Voice bridge running, PID ' + (Start-VoiceBridge $InstallDirectory)) }
 Write-Host "Installed: $InstallDirectory"

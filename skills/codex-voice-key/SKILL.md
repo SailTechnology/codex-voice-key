@@ -30,13 +30,19 @@ The default install folder is `%LOCALAPPDATA%\CodexVoiceKey`.
 & "$env:LOCALAPPDATA\CodexVoiceKey\scripts\Doctor.ps1"
 ```
 
-`config.json` contains `Hotkey`, `TargetProcesses`, `HandyPath`, `ModelId`, `Microphone`, `PlaySounds`, `KeepRecordings`, `MaxRecordingSeconds`, `TranscriptionTimeoutSeconds`, and `TaskbarGap`. Change only the requested settings. For microphone selection, use `default`, a device-name substring, or the device index listed by the doctor. Restart the bridge after manual edits. `TaskbarGap` is in logical pixels; the capsule centers above the taskbar on Codex's display.
+`config.json` contains `Hotkey`, `TargetProcesses`, `HandyPath`, `ModelId`, `Microphone`, `PlaySounds`, `KeepModelLoaded`, `ModelIdleSeconds`, `KeepRecordings`, `MaxRecordingSeconds`, `TranscriptionTimeoutSeconds`, and `TaskbarGap`. Change only the requested settings. For microphone selection, use `default`, a device-name substring, or the device index listed by the doctor. Restart the bridge after manual edits. `TaskbarGap` is in logical pixels; the capsule centers above the taskbar on Codex's display.
+
+By default the model loads when recording begins, stays available between utterances, and releases its worker and GPU memory after 60 idle seconds. Login starts only the lightweight key bridge. `ModelIdleSeconds` accepts 1–3600; 0 keeps the model until exit. `KeepModelLoaded: false` restores one-shot Handy CLI inference. Warm mode uses Handy 0.9.8's transcribe.cpp 0.2.4 library and automatic language detection; incompatible libraries, crashes and timeouts fall back to Handy for the same recording. Use the one-shot path when Handy-specific language or text-processing preferences must apply.
 
 For a custom installation location, pass `-InstallDirectory` to the management scripts. The executable also accepts `--config <path>`.
 
 ## Diagnose
 
 Run `Doctor.ps1` first. Check the configured binding, target process name, microphone list, backend path and bridge log. A successful process start or visual preview does not prove microphone recognition. If testing speech is needed, use a user-provided recording or ask them to hold the chosen key and speak in Codex. Keep recordings and transcript content local.
+
+Version 1.1.0 fixes an audio-resampling integer overflow that caused longer captures to fail before recognition. If older logs contain `startIndex` out-of-range errors while short phrases work, upgrade the bridge. Current pipeline errors include `stage=capture`, `recognition`, or `paste` and a stack trace; diagnose the failing stage before changing the model.
+
+For latency or resource complaints, inspect `resident model ready`, `elapsed_ms`, fallback errors, and `resident model released after idle` in the log. Two bridge executables while a model is loaded are expected: the hotkey process and its private recognition worker. The worker must exit after the configured idle time; inspect actual per-process memory/GPU allocation rather than inferring it from the model file size.
 
 `--overlay-preview` shows all four states without recording or keyboard hooks. `--transcribe-file <wav>` tests the installed backend without pasting text. Recognition runs locally after downloads; clipboard content is replaced with the transcript. If focus changes, text stays on the clipboard instead of being pasted into a different window.
 

@@ -13,7 +13,9 @@ namespace CodexVoiceKey
             byte[] output = new byte[count * 2];
             for (int i = 0; i < count; i++)
             {
-                double position = i * sampleRate / 16000.0;
+                // Promote before multiplying: int arithmetic overflows after
+                // only 8.4 seconds at 16 kHz (2.8 seconds at 48 kHz).
+                double position = (double)i * sampleRate / 16000.0;
                 int a = Math.Min((int)position, frames - 1), b = Math.Min(a + 1, frames - 1);
                 double mixA = 0, mixB = 0;
                 for (int channel = 0; channel < channels; channel++)

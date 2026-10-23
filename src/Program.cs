@@ -19,6 +19,10 @@ namespace CodexVoiceKey
         private static Session current;
         private static bool processing;
         private static System.Windows.Forms.Timer safetyTimer;
+        private static ResidentTranscriber resident;
+        private static string configPath;
+        private static readonly object ResidentSync = new object();
+        private static int idleCheckQueued;
 
         private sealed class Session
         {
@@ -38,6 +42,7 @@ namespace CodexVoiceKey
             {
                 string config = Argument(args, "--config") ?? Path.Combine(DataDirectory, "config.json");
                 config = Path.GetFullPath(config);
+                configPath = config;
                 DataDirectory = Path.GetDirectoryName(config);
                 Settings = AppSettings.Load(config);
                 // A WinExe has no console code page. Set stream encodings directly
@@ -48,6 +53,7 @@ namespace CodexVoiceKey
                     Console.SetError(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true });
                 }
                 catch (IOException) { }
+                if (Array.IndexOf(args, "--asr-worker") >= 0) return ResidentTranscriber.RunWorker(Settings);
                 string validate = Argument(args, "--validate-hotkey");
                 if (validate != null) { Console.WriteLine(HotkeyBinding.Parse(validate).Label); return 0; }
                 string diagnose = Argument(args, "--diagnose");
@@ -58,7 +64,10 @@ namespace CodexVoiceKey
                         handyPath = Settings.HandyPath, model = Settings.ModelId,
                         modelFound = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "com.pais.handy", "models", Path.GetFileName(Settings.ModelId))),
                         microphones = WaveInRecorder.ListDevices(), configPath = config,
-                        targetProcesses = Settings.TargetProcesses, capture = "waveIn", architecture = IntPtr.Size * 8
+                        targetProcesses = Settings.TargetProcesses, capture = "waveIn", architecture = IntPtr.Size * 8,
+                        keepModelLoaded = Settings.KeepModelLoaded,
+                        modelIdleSeconds = Settings.ModelIdleSeconds,
+                        nativeLibraryFound = File.Exists(Path.Combine(Path.GetDirectoryName(Settings.HandyPath), "transcribe.dll"))
                     };
                     File.WriteAllText(diagnose, new JavaScriptSerializer().Serialize(report), new UTF8Encoding(false));
                     return 0;
@@ -98,6 +107,13 @@ namespace CodexVoiceKey
                         lock (Sync) session = current;
                         if (session != null && !session.Released && session.Duration.Elapsed.TotalSeconds >= Settings.MaxRecordingSeconds)
                             EndVoiceCapture("recording time limit");
+                        ResidentTranscriber cached = resident;
+                        if (session == null && cached != null && Settings.ModelIdleSeconds > 0 && Interlocked.CompareExchange(ref idleCheckQueued, 1, 0) == 0)
+                            ThreadPool.QueueUserWorkItem(delegate {
+                                try { cached.ReleaseIfIdle(Settings.ModelIdleSeconds); }
+                                catch (Exception error) { Log("model idle release failed: " + error.Message); }
+                                finally { Interlocked.Exchange(ref idleCheckQueued, 0); }
+                            });
                     };
                     safetyTimer.Start();
                     Log("bridge started; capture=waveIn; hotkey=" + Settings.Hotkey + "; model=" + Settings.ModelId);
@@ -112,6 +128,7 @@ namespace CodexVoiceKey
                 try { Console.Error.WriteLine(error.Message); } catch (IOException) { }
                 return 1;
             }
+            finally { lock (ResidentSync) { if (resident != null) resident.Dispose(); } }
         }
 
         private static string Argument(string[] args, string name)
@@ -153,12 +170,18 @@ namespace CodexVoiceKey
                 current = session;
             }
             VoiceOverlay.ShowRecording();
+            if (Settings.KeepModelLoaded) GetResident().Touch();
             ThreadPool.QueueUserWorkItem(delegate {
                 bool failedBeforeRelease = false;
                 try
                 {
                     session.Recorder.Start();
                     Log("capture started; device=" + session.Recorder.DeviceName);
+                    if (Settings.KeepModelLoaded)
+                        ThreadPool.QueueUserWorkItem(delegate {
+                            try { GetResident().WarmUp(); }
+                            catch (Exception error) { Log("resident warmup unavailable; Handy fallback active: " + error.Message); }
+                        });
                     if (Settings.PlaySounds) try { SystemSounds.Asterisk.Play(); } catch { }
                 }
                 catch (Exception error)
@@ -192,6 +215,7 @@ namespace CodexVoiceKey
             }
             VoiceOverlay.ShowTranscribing();
             ThreadPool.QueueUserWorkItem(delegate {
+                string stage = "capture";
                 try
                 {
                     if (!session.Ready.WaitOne(10000)) throw new TimeoutException("Microphone startup timed out.");
@@ -205,14 +229,22 @@ namespace CodexVoiceKey
                         VoiceOverlay.ShowError("录音太短");
                         return;
                     }
+                    stage = "recognition";
                     string text = Transcribe(session.Path);
                     if (String.IsNullOrWhiteSpace(text)) { VoiceOverlay.ShowError("没有识别到语音"); return; }
+                    stage = "paste";
                     bool pasted = PasteIntoTarget(text, session.Target);
                     Log("transcription completed; characters=" + text.Length + "; pasted=" + pasted);
                     if (pasted) VoiceOverlay.ShowSuccess("已经放进输入框");
                     else VoiceOverlay.ShowCopied("已经识别好了");
                 }
-                catch (Exception error) { Log("voice pipeline failed: " + error.Message); VoiceOverlay.ShowError("转写失败，请运行诊断"); }
+                catch (Exception error)
+                {
+                    // Keep the failing stage and stack trace, never transcript text.
+                    Log("voice pipeline failed; stage=" + stage + "; type=" + error.GetType().Name + ": " + error.Message + Environment.NewLine + error.StackTrace);
+                    VoiceOverlay.ShowError(stage == "capture" ? "录音处理失败，请重试" :
+                        stage == "recognition" ? "语音识别失败，请重试" : "文字填入失败，请重试");
+                }
                 finally
                 {
                     session.Recorder.Dispose();
@@ -224,6 +256,31 @@ namespace CodexVoiceKey
         }
 
         internal static string Transcribe(string path)
+        {
+            if (Settings.KeepModelLoaded)
+            {
+                try { return GetResident().Transcribe(path); }
+                catch (Exception error) { Log("resident transcription unavailable; using Handy CLI: " + error.Message); }
+            }
+            return TranscribeWithHandy(path);
+        }
+
+        private static ResidentTranscriber GetResident()
+        {
+            lock (ResidentSync)
+            {
+                if (resident == null)
+                    resident = new ResidentTranscriber(delegate {
+                        return new ProcessStartInfo {
+                            FileName = Application.ExecutablePath,
+                            Arguments = "--asr-worker --config " + Quote(configPath)
+                        };
+                    }, Settings.TranscriptionTimeoutSeconds * 1000, Log);
+                return resident;
+            }
+        }
+
+        private static string TranscribeWithHandy(string path)
         {
             if (!File.Exists(Settings.HandyPath)) throw new FileNotFoundException("Handy is missing. Run scripts\\install.ps1.", Settings.HandyPath);
             ProcessStartInfo start = new ProcessStartInfo {

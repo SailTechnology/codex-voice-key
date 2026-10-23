@@ -12,6 +12,8 @@ namespace CodexVoiceKey
         public string ModelId { get; set; }
         public string Microphone { get; set; }
         public bool PlaySounds { get; set; }
+        public bool KeepModelLoaded { get; set; }
+        public int ModelIdleSeconds { get; set; }
         public bool KeepRecordings { get; set; }
         public int MaxRecordingSeconds { get; set; }
         public int TranscriptionTimeoutSeconds { get; set; }
@@ -25,6 +27,8 @@ namespace CodexVoiceKey
             ModelId = "handy-computer/Qwen3-ASR-1.7B-gguf/Qwen3-ASR-1.7B-Q5_K_M.gguf";
             Microphone = "default";
             PlaySounds = true;
+            KeepModelLoaded = true;
+            ModelIdleSeconds = 60;
             KeepRecordings = false;
             MaxRecordingSeconds = 120;
             TranscriptionTimeoutSeconds = 120;
@@ -57,6 +61,8 @@ namespace CodexVoiceKey
                 throw new InvalidDataException("MaxRecordingSeconds must be between 1 and 600.");
             if (TranscriptionTimeoutSeconds < 5 || TranscriptionTimeoutSeconds > 1800)
                 throw new InvalidDataException("TranscriptionTimeoutSeconds must be between 5 and 1800.");
+            if (ModelIdleSeconds < 0 || ModelIdleSeconds > 3600)
+                throw new InvalidDataException("ModelIdleSeconds must be between 0 and 3600 (0 keeps the loaded model until exit).");
             if (TaskbarGap < 0 || TaskbarGap > 200) throw new InvalidDataException("TaskbarGap must be between 0 and 200.");
         }
     }

@@ -6,6 +6,9 @@ relicensed by this repository.
 
 - [Handy](https://github.com/cjpais/Handy), MIT license. The installer downloads
   the official v0.9.8 Windows x64 release and verifies its published SHA-256.
+- [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp), MIT license.
+  Resident inference loads Handy's installed 0.2.4 native library through its
+  public C API. Native DLLs are not copied into this repository or release ZIP.
 - [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) and the
   [Handy GGUF conversion](https://huggingface.co/handy-computer/Qwen3-ASR-1.7B-gguf).
   Model files are downloaded separately; consult their model cards/licenses.

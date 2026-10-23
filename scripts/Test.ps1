@@ -1,13 +1,14 @@
 ﻿param([switch]$SkipInstallTest)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+. (Join-Path $PSScriptRoot 'Common.ps1')
 & (Join-Path $PSScriptRoot 'build.ps1') | Out-Host
 $testRoot = Join-Path $repoRoot '.test-work'
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src') -Filter '*.cs' | ForEach-Object FullName)
 $testExe = Join-Path $testRoot 'CoreTests.exe'
-& $compiler /nologo /target:exe /platform:x64 /codepage:65001 /main:CodexVoiceKey.CoreTests ('/out:' + $testExe) /reference:System.Web.Extensions.dll @sources (Join-Path $repoRoot 'tests\CoreTests.cs')
+& $compiler /nologo /target:exe /platform:x64 /codepage:65001 /main:CodexVoiceKey.CoreTests ('/out:' + $testExe) /reference:System.Web.Extensions.dll @sources (Join-Path $repoRoot 'tests\CoreTests.cs') (Join-Path $repoRoot 'tests\ResidentTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Core tests did not compile.' }
 & $testExe
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
@@ -23,9 +24,18 @@ if (-not $SkipInstallTest) {
     & (Join-Path $PSScriptRoot 'Set-Hotkey.ps1') -InstallDirectory $installPath -Hotkey 'MouseX1' -NoRestart
     $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Hotkey -ne 'MouseX1') { throw 'Hotkey setting was not saved.' }
+    # Simulate upgrading a 1.0 configuration that predates resident inference.
+    $settings.PSObject.Properties.Remove('KeepModelLoaded')
+    Write-VoiceJson -Path (Join-Path $installPath 'config.json') -Value $settings
     & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -SkipBackend -NoStart -NoStartup -NoSkill
     $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Hotkey -ne 'MouseX1') { throw 'Upgrade overwrote the existing hotkey.' }
+    if ($settings.KeepModelLoaded -ne $true) { throw 'Upgrade did not add the new resident-model default.' }
+    $settings.KeepModelLoaded = $false
+    Write-VoiceJson -Path (Join-Path $installPath 'config.json') -Value $settings
+    & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -SkipBackend -NoStart -NoStartup -NoSkill
+    $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($settings.KeepModelLoaded -ne $false) { throw 'Upgrade reenabled an explicitly disabled resident model.' }
     & (Join-Path $PSScriptRoot 'Uninstall.ps1') -InstallDirectory $installPath
     if (Test-Path -LiteralPath (Join-Path $installPath 'CodexVoiceKey.exe')) { throw 'Uninstall left the executable.' }
     if (-not (Test-Path -LiteralPath (Join-Path $installPath 'config.json'))) { throw 'Uninstall removed user configuration.' }

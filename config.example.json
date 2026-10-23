@@ -5,6 +5,8 @@
   "ModelId": "handy-computer/Qwen3-ASR-1.7B-gguf/Qwen3-ASR-1.7B-Q5_K_M.gguf",
   "Microphone": "default",
   "PlaySounds": true,
+  "KeepModelLoaded": true,
+  "ModelIdleSeconds": 60,
   "KeepRecordings": false,
   "MaxRecordingSeconds": 120,
   "TranscriptionTimeoutSeconds": 120,
