@@ -1,4 +1,4 @@
-﻿param([string]$Version = '1.0.0')
+﻿param([string]$Version = '1.0.1')
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 & (Join-Path $PSScriptRoot 'build.ps1') | Out-Host

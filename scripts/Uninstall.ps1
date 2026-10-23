@@ -19,7 +19,12 @@ if (Test-Path -LiteralPath $shortcutPath) {
     if ($shortcut.TargetPath -eq $executable) { Remove-Item -LiteralPath $shortcutPath -Force }
 }
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$runValue = Get-ItemPropertyValue -LiteralPath $runKey -Name 'CodexVoiceKey' -ErrorAction SilentlyContinue
+$runValue = $null
+if (Test-Path -LiteralPath $runKey) {
+    $runProperties = Get-ItemProperty -LiteralPath $runKey
+    $runProperty = $runProperties.PSObject.Properties['CodexVoiceKey']
+    if ($runProperty) { $runValue = $runProperty.Value }
+}
 if ($runValue -and $runValue.Contains($executable)) { Remove-ItemProperty -LiteralPath $runKey -Name 'CodexVoiceKey' }
 foreach ($ownedFile in $ownedFiles) { if (Test-Path -LiteralPath $ownedFile) { Remove-Item -LiteralPath $ownedFile -Force } }
 Write-Host "Removed Codex Voice Key. Configuration, logs, model files and the reusable skill are preserved in $InstallDirectory."
