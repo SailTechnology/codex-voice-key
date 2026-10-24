@@ -16,6 +16,7 @@ namespace CodexVoiceKey
         public bool KeepModelLoaded { get; set; }
         public int ModelIdleSeconds { get; set; }
         public bool LivePreview { get; set; }
+        public bool MuteOutputWhileRecording { get; set; }
         public bool KeepRecordings { get; set; }
         public int MaxRecordingSeconds { get; set; }
         public int TranscriptionTimeoutSeconds { get; set; }
@@ -32,6 +33,7 @@ namespace CodexVoiceKey
             KeepModelLoaded = true;
             ModelIdleSeconds = 60;
             LivePreview = true;
+            MuteOutputWhileRecording = true;
             KeepRecordings = false;
             MaxRecordingSeconds = 120;
             TranscriptionTimeoutSeconds = 120;

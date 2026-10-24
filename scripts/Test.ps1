@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'src') -Filter '*.cs' | ForEach-Object FullName)
 $testExe = Join-Path $testRoot 'CoreTests.exe'
-& $compiler /nologo /target:exe /platform:x64 /codepage:65001 /main:CodexVoiceKey.CoreTests ('/out:' + $testExe) /reference:System.Web.Extensions.dll @sources (Join-Path $repoRoot 'tests\CoreTests.cs') (Join-Path $repoRoot 'tests\ResidentTests.cs')
+& $compiler /nologo /target:exe /platform:x64 /codepage:65001 /main:CodexVoiceKey.CoreTests ('/out:' + $testExe) /reference:System.Web.Extensions.dll @sources (Join-Path $repoRoot 'tests\CoreTests.cs') (Join-Path $repoRoot 'tests\ResidentTests.cs') (Join-Path $repoRoot 'tests\AudioMuteTests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Core tests did not compile.' }
 & $testExe
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
@@ -28,21 +28,25 @@ if (-not $SkipInstallTest) {
     # Simulate upgrading a 1.0 configuration that predates resident inference.
     $settings.PSObject.Properties.Remove('KeepModelLoaded')
     $settings.PSObject.Properties.Remove('LivePreview')
+    $settings.PSObject.Properties.Remove('MuteOutputWhileRecording')
     Write-VoiceJson -Path (Join-Path $installPath 'config.json') -Value $settings
     & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -SkipBackend -NoStart -NoStartup -NoSkill
     $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Hotkey -ne 'MouseX1') { throw 'Upgrade overwrote the existing hotkey.' }
     if ($settings.KeepModelLoaded -ne $true) { throw 'Upgrade did not add the new resident-model default.' }
     if ($settings.LivePreview -ne $true) { throw 'Upgrade did not add live-preview defaults.' }
+    if ($settings.MuteOutputWhileRecording -ne $true) { throw 'Upgrade did not add output-mute defaults.' }
     if ($settings.AllApplications -ne $true) { throw 'Upgrade disabled global dictation.' }
     $settings.KeepModelLoaded = $false
     $settings.LivePreview = $false
     $settings.AllApplications = $false
+    $settings.MuteOutputWhileRecording = $false
     Write-VoiceJson -Path (Join-Path $installPath 'config.json') -Value $settings
     & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -SkipBackend -NoStart -NoStartup -NoSkill
     $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.KeepModelLoaded -ne $false) { throw 'Upgrade reenabled an explicitly disabled resident model.' }
     if ($settings.LivePreview -ne $false -or $settings.AllApplications -ne $false) { throw 'Upgrade overwrote explicitly disabled preview or global scope.' }
+    if ($settings.MuteOutputWhileRecording -ne $false) { throw 'Upgrade reenabled explicitly disabled output muting.' }
     & (Join-Path $PSScriptRoot 'Uninstall.ps1') -InstallDirectory $installPath
     if (Test-Path -LiteralPath (Join-Path $installPath 'CodexVoiceKey.exe')) { throw 'Uninstall left the executable.' }
     if (-not (Test-Path -LiteralPath (Join-Path $installPath 'config.json'))) { throw 'Uninstall removed user configuration.' }

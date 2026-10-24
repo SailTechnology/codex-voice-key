@@ -27,6 +27,7 @@ namespace CodexVoiceKey
         private sealed class Session
         {
             public WaveInRecorder Recorder;
+            public volatile RecordingMute OutputMute;
             public readonly ManualResetEvent Ready = new ManualResetEvent(false);
             public string Path;
             public Exception StartError;
@@ -57,6 +58,11 @@ namespace CodexVoiceKey
                     Console.SetError(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true });
                 }
                 catch (IOException) { }
+                if (Array.IndexOf(args, "--audio-guard") >= 0 || Array.IndexOf(args, "--restore-audio") >= 0)
+                    return RecordingMute.RunGuard(config,
+                        Int32.Parse(Argument(args, "--audio-parent") ?? "0"),
+                        Int64.Parse(Argument(args, "--audio-parent-start") ?? "0"),
+                        Settings.MaxRecordingSeconds, Array.IndexOf(args, "--restore-audio") >= 0);
                 if (Array.IndexOf(args, "--asr-worker") >= 0) return ResidentTranscriber.RunWorker(Settings);
                 string validate = Argument(args, "--validate-hotkey");
                 if (validate != null) { Console.WriteLine(HotkeyBinding.Parse(validate).Label); return 0; }
@@ -70,6 +76,7 @@ namespace CodexVoiceKey
                         microphones = WaveInRecorder.ListDevices(), configPath = config,
                         targetProcesses = Settings.TargetProcesses, capture = "waveIn", architecture = IntPtr.Size * 8,
                         allApplications = Settings.AllApplications, livePreview = Settings.LivePreview,
+                        muteOutputWhileRecording = Settings.MuteOutputWhileRecording,
                         keepModelLoaded = Settings.KeepModelLoaded,
                         modelIdleSeconds = Settings.ModelIdleSeconds,
                         nativeLibraryFound = File.Exists(Path.Combine(Path.GetDirectoryName(Settings.HandyPath), "transcribe.dll"))
@@ -102,6 +109,8 @@ namespace CodexVoiceKey
                 using (Mutex mutex = new Mutex(true, "Local\\CodexVoiceKeyBridge", out created))
                 {
                     if (!created) return 0;
+                    try { RecordingMute.RecoverIfNeeded(Application.ExecutablePath, configPath, Log); }
+                    catch (Exception error) { Log("saved output recovery unavailable: " + error.GetType().Name); }
                     Directory.CreateDirectory(Path.Combine(DataDirectory, "recordings"));
                     VoiceOverlay.Initialize();
                     InputHooks.Start(HotkeyBinding.Parse(Settings.Hotkey));
@@ -110,6 +119,8 @@ namespace CodexVoiceKey
                     safetyTimer.Tick += delegate {
                         Session session;
                         lock (Sync) session = current;
+                        if (session != null && !session.Released && session.OutputMute != null && !session.OutputMute.IsActive)
+                            EndVoiceCapture("audio output guard ended");
                         if (session != null && !session.Released && session.Duration.Elapsed.TotalSeconds >= Settings.MaxRecordingSeconds)
                             EndVoiceCapture("recording time limit");
                         if (session != null && !session.Released)
@@ -145,7 +156,13 @@ namespace CodexVoiceKey
                 try { Console.Error.WriteLine(error.Message); } catch (IOException) { }
                 return 1;
             }
-            finally { lock (ResidentSync) { if (resident != null) resident.Dispose(); } }
+            finally
+            {
+                Session session;
+                lock (Sync) session = current;
+                if (session != null && session.OutputMute != null) session.OutputMute.Dispose();
+                lock (ResidentSync) { if (resident != null) resident.Dispose(); }
+            }
         }
 
         private static string Argument(string[] args, string name)
@@ -192,8 +209,12 @@ namespace CodexVoiceKey
             if (Settings.KeepModelLoaded) GetResident().Touch();
             ThreadPool.QueueUserWorkItem(delegate {
                 bool failedBeforeRelease = false;
+                string startupStage = "audio";
                 try
                 {
+                    if (Settings.MuteOutputWhileRecording)
+                        session.OutputMute = RecordingMute.Begin(Application.ExecutablePath, configPath, Log);
+                    startupStage = "microphone";
                     session.Recorder.Start();
                     Log("capture started; device=" + session.Recorder.DeviceName);
                     if (Settings.KeepModelLoaded)
@@ -206,8 +227,9 @@ namespace CodexVoiceKey
                 catch (Exception error)
                 {
                     session.StartError = error;
-                    VoiceOverlay.ShowError("麦克风打开失败");
-                    Log("capture failed: " + error.Message);
+                    if (session.OutputMute != null) session.OutputMute.Dispose();
+                    VoiceOverlay.ShowError(startupStage == "audio" ? "外放静音失败，请重试" : "麦克风打开失败");
+                    Log("capture failed; stage=" + startupStage + ": " + error.Message);
                     lock (Sync)
                     {
                         if (current == session && !session.Released)
@@ -239,8 +261,12 @@ namespace CodexVoiceKey
                 {
                     if (!session.Ready.WaitOne(10000)) throw new TimeoutException("Microphone startup timed out.");
                     if (session.StartError != null) throw session.StartError;
-                    session.Recorder.Stop();
-                    session.Recorder.Dispose();
+                    try { session.Recorder.Stop(); }
+                    finally
+                    {
+                        session.Recorder.Dispose();
+                        if (session.OutputMute != null) session.OutputMute.Dispose();
+                    }
                     Log("capture stopped; reason=" + reason);
                     if (Settings.PlaySounds) try { SystemSounds.Beep.Play(); } catch { }
                     if (!File.Exists(session.Path) || new FileInfo(session.Path).Length < 8000)
@@ -269,6 +295,7 @@ namespace CodexVoiceKey
                 finally
                 {
                     session.Recorder.Dispose();
+                    if (session.OutputMute != null) session.OutputMute.Dispose();
                     if (!Settings.KeepRecordings) try { if (File.Exists(session.Path)) File.Delete(session.Path); } catch { }
                     lock (Sync) { if (current == session) { current = null; processing = false; } }
                     session.Ready.Dispose();

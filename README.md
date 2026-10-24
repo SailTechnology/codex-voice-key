@@ -89,6 +89,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -U
 - 转写完成时，只有原来的窗口仍在前台才会粘贴；切换应用或可检测到的原生输入控件后，文字留在剪贴板。
   程序等待语音组合键的修饰键松开后再粘贴，避免误触其他应用的快捷键。
 - **只粘贴，不自动发送**。转写文字会替换剪贴板内容。
+- 默认 `MuteOutputWhileRecording: true`：录音前自动静音当前活动的音频输出设备，松开并停止录音后立即恢复，
+  无需等待转写结束。保留各设备原本的静音状态，不更改音量数值或麦克风设置。
+  视频和音乐的播放进度会继续；自动续播的视频也会保持无声。设为 `false` 可关闭。
+  临时守护进程负责恢复，语音桥意外退出也会释放静音；恢复记录保存在本机，启动时检查未完成的恢复。
+  升级和卸载会先等待守护进程恢复声音，已断开的设备会保留待恢复记录。
 - 默认不保留音频，成功、空结果和失败流程都会清理临时录音；可配置 `KeepRecordings`。
 - 默认在按下语音键、开始录音时预加载模型，后续多句语音复用同一个模型，避免每句重复加载。
   **空闲 60 秒自动释放模型和显存**，开机登录时只启动轻量按键程序。下次加载尽量与讲话重叠；
@@ -120,6 +125,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -U
 `PlaySounds: false` 关闭开始和结束提示音，界面状态继续显示。
 日志中的 `resident model ready` 表示后台模型已就绪，`elapsed_ms` 是该次常驻转写耗时。
 后台模型就绪时会有两个 `CodexVoiceKey.exe` 进程：按键程序和不接触麦克风/剪贴板的识别进程。
+开启录音静音时，讲话期间还会有一个临时音频守护进程，停止录音后退出；它不加载识别模型。
 错误提示会区分录音处理、语音识别和文字填入；日志保留出错阶段及调用栈，便于定位。
 1.1.0 修复了旧版长录音在采样率转换时出现的整数溢出；若日志出现 `startIndex`
 越界且短句正常、长句失败，请升级。音频转换已覆盖 16/44.1/48 kHz 的 20 秒和 120 秒录音测试。
@@ -156,6 +162,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -U
 只使用 Windows 自带的 C# 编译器。测试覆盖按键与修饰键事件序列、鼠标按钮、
 长按、Win64 输入结构、Unicode JSON、音频转换、后台进程复用/异常/超时清理，以及隔离目录中的安装、配置、
 升级、诊断和卸载。测试不会向桌面注入按键、录制麦克风或修改真实启动项。
+静音自动检查使用模拟输出设备，覆盖原状态保留、新设备、部分失败和恢复记录，不改变测试机的实际声音。
+输出静音使用 [Windows Core Audio 的 SetMute 接口](https://learn.microsoft.com/en-us/windows/win32/api/endpointvolume/nf-endpointvolume-iaudioendpointvolume-setmute)。
 这类检查不能代替用户在自己电脑上的麦克风和硬件 Copilot 按键实测。
 
 代码及 skill 使用 MIT 许可；水跃鱼形象是非官方同人素材，不包含在代码 MIT 授权中。

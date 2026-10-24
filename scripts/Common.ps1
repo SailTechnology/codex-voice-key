@@ -16,9 +16,18 @@ function Stop-VoiceBridge {
     param([string]$InstallDirectory)
     $executable = Join-Path $InstallDirectory 'CodexVoiceKey.exe'
     $instances = @(Get-CimInstance Win32_Process -Filter "Name='CodexVoiceKey.exe'" | Where-Object { $_.ExecutablePath -eq $executable })
-    foreach ($instance in $instances) {
+    $audioGuards = @($instances | Where-Object { $_.CommandLine -match '--audio-guard|--restore-audio' })
+    foreach ($instance in @($instances | Where-Object { $_.CommandLine -notmatch '--audio-guard|--restore-audio' })) {
         $runningProcess = Get-Process -Id $instance.ProcessId -ErrorAction SilentlyContinue
         if ($runningProcess) { Stop-Process -Id $runningProcess.Id -Force; [void]$runningProcess.WaitForExit(5000) }
+    }
+    # A dead parent's stdin closes automatically. Let its audio guard restore
+    # output states before upgrading/removing the executable it is running.
+    foreach ($instance in $audioGuards) {
+        $runningProcess = Get-Process -Id $instance.ProcessId -ErrorAction SilentlyContinue
+        if ($runningProcess -and -not $runningProcess.WaitForExit(6000)) {
+            throw 'Audio restoration is still running. Wait briefly before retrying.'
+        }
     }
     return ($instances.Count -gt 0)
 }

@@ -9,6 +9,7 @@
   "KeepModelLoaded": true,
   "ModelIdleSeconds": 60,
   "LivePreview": true,
+  "MuteOutputWhileRecording": true,
   "KeepRecordings": false,
   "MaxRecordingSeconds": 120,
   "TranscriptionTimeoutSeconds": 120,

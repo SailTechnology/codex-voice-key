@@ -153,6 +153,7 @@ namespace CodexVoiceKey
                     Check(invalidAudio, "Reject malformed WAV without native access");
                 }
                 finally { File.Delete(temp); }
+                AudioMuteTests.Run(Check);
                 ResidentTests.Run(Check);
                 Console.WriteLine("PASS: " + count + " input, modifier, JSON, ABI and audio checks (no system input injected).");
                 return 0;

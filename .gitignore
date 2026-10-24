@@ -5,6 +5,8 @@ config.json
 diagnostics.json
 installation.json
 recordings/
+audio-output-restore.json
+audio-output-restore.json.tmp
 *.wav
 *.gguf
 *.log

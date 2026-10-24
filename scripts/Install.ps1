@@ -64,7 +64,7 @@ if (-not $NoSkill) {
     Copy-Item -Path (Join-Path $repoRoot 'skills\codex-voice-key\*') -Destination $skillDestination -Recurse -Force
 }
 Write-VoiceJson -Path (Join-Path $InstallDirectory 'installation.json') -Value ([ordered]@{
-    version='1.2.0'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
+    version='1.3.0'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
 })
 if (-not $NoStart) { Write-Host ('Voice bridge running, PID ' + (Start-VoiceBridge $InstallDirectory)) }
 Write-Host "Installed: $InstallDirectory"
