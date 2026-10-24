@@ -23,7 +23,7 @@ namespace CodexVoiceKey
             }
         }
 
-        public static void Draw(Graphics graphics, Rectangle bounds, DoctorMood mood, double elapsedMs)
+        public static void Draw(Graphics graphics, Rectangle bounds, DoctorMood mood, double elapsedMs, float voiceLevel = 0)
         {
             int frame = 0;
             if (mood == DoctorMood.Thinking) frame = 1;
@@ -36,9 +36,19 @@ namespace CodexVoiceKey
             Rectangle source = new Rectangle((frame % 2) * cellWidth,
                 (frame / 2) * cellHeight, cellWidth, cellHeight);
             int size = Math.Min(bounds.Width, bounds.Height);
-            int bob = mood == DoctorMood.Listening && Math.Sin(elapsedMs / 420.0) > 0.65 ? 1 : 0;
+            int bob = 0;
+            int sway = 0;
+            if (mood == DoctorMood.Listening)
+            {
+                bob = (int)Math.Round(Math.Sin(elapsedMs / 360.0) * (0.7 + voiceLevel * 1.8));
+                sway = (int)Math.Round(Math.Sin(elapsedMs / 1200.0));
+            }
+            else if (mood == DoctorMood.Thinking) bob = (int)Math.Round(Math.Sin(elapsedMs / 540.0));
+            else if (mood == DoctorMood.Happy && elapsedMs < 1000)
+                bob = -(int)Math.Round(3 * Math.Abs(Math.Sin(elapsedMs * Math.PI / 380)) * (1 - elapsedMs / 1000));
             Rectangle target = new Rectangle(bounds.Left + (bounds.Width - size) / 2,
                 bounds.Top + (bounds.Height - size) / 2 + bob, size, size);
+            target.X += sway;
             GraphicsState saved = graphics.Save();
             try
             {

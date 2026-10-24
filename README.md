@@ -2,6 +2,8 @@
 
 给 Windows 版 Codex 加一个可自定义按键的**本地语音输入**：按住说话，松开后由
 **Qwen3-ASR 1.7B** 识别中英文并放进输入框。配有暖白色平滑胶囊和戴博士帽的像素水跃鱼。
+也可开启**全局输入**，用于微信、浏览器、文档和其他支持粘贴的输入框。
+讲话时胶囊逐步显示识别预览，松开后校正整句并填入；小水跃鱼和音量条随声音起伏。
 
 **不限于 Copilot 键。** 可用 `Ctrl+B`、`F8`、鼠标中键、两个鼠标侧键，或者自己的组合键。
 默认是 `Ctrl+Alt+Space`。
@@ -33,6 +35,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -U
 .\scripts\Install.ps1 -Hotkey 'Ctrl+B'
 .\scripts\Install.ps1 -Hotkey 'MouseX1'
 .\scripts\Install.ps1 -Hotkey 'Copilot'
+.\scripts\Install.ps1 -Hotkey 'Copilot' -AllApplications
 ```
 
 ### 安装为 Codex skill
@@ -61,7 +64,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -U
 | `Copilot` | 识别物理 Copilot 键的 Win+Shift+F23 组合 |
 
 **按住开始，松开结束**。长按重复事件不会反复启动录音。
-仅在配置的目标应用前台时开始录音。普通自定义键在其他应用中保留原本功能；
+默认仅在配置的目标应用前台时开始录音。用 `-AllApplications` 安装，或将
+`config.json` 中的 `AllApplications` 设为 `true` 并重启，就可以在其他应用中录音和填入文字。
+先点击要输入的位置，再按住语音键。全局模式会在所有应用中占用所选语音键。
+仅目标应用模式下，普通自定义键在其他应用中保留原本功能；
 选择 `Copilot` 时，该硬件组合会在全局保留给语音桥，避免弹出 Copilot。
 不要把日常打字键或常用组合设成语音键，除非你确实想在 Codex 中占用它。
 鼠标左/右键和单独的 Ctrl、Alt、Shift、Win 不作为语音键。
@@ -74,12 +80,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -U
 
 ## 使用细节
 
-- 胶囊显示聆听、转写、完成和出错四种状态，位于 **Codex 所在屏幕的任务栏上方居中**。
+- 胶囊显示聆听、文字预览、转写、完成和出错状态，位于 **开始录音的应用所在屏幕的任务栏上方居中**。
 - 外框、圆角、文字、状态图标平滑绘制；只有角色是像素风，支持显示缩放。
+- 聆听时角色轻轻摆动，波形和呼吸环跟随实际麦克风音量；整理文字、完成和重试有不同表情，配有 26 句轮换短句。
 - 默认开机登录自启，普通权限运行。安装参数 `-NoStartup` 可关闭创建启动项，
   `-NoStart` 可只安装而不立即运行。
 - 使用 Windows 默认麦克风，自动尝试可用采样格式。识别前转换成 16 kHz 单声道。
-- 转写完成时，只有原来的 Codex 窗口仍在前台才会粘贴；切换应用后文字留在剪贴板。
+- 转写完成时，只有原来的窗口仍在前台才会粘贴；切换应用或可检测到的原生输入控件后，文字留在剪贴板。
+  程序等待语音组合键的修饰键松开后再粘贴，避免误触其他应用的快捷键。
 - **只粘贴，不自动发送**。转写文字会替换剪贴板内容。
 - 默认不保留音频，成功、空结果和失败流程都会清理临时录音；可配置 `KeepRecordings`。
 - 默认在按下语音键、开始录音时预加载模型，后续多句语音复用同一个模型，避免每句重复加载。
@@ -91,6 +99,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Install.ps1 -U
   设为 0 才会一直保留到退出。可设置 `KeepModelLoaded: false` 恢复逐句加载。
   常驻路径使用模型默认的语言自动检测；如需继承 Handy 的语言或文本处理设置，也可关闭常驻。
   识别率取决于麦克风、噪声与表达，请在自己的设备上试说中文、英文或混合语句。
+- `LivePreview: true` 时，模型就绪后约每 2.2 秒尝试刷新一次胶囊里的文字；预览处理最近至多 12 秒的声音，
+  显示最近的文字，避免长时间讲话时反复处理全部录音。预览可能随上下文修正，松开后才转写并填入完整录音。
+  它与最终识别共用一个模型进程，不写入输入框、不触发 Handy 回退；模型忙时跳过预览。
+  首次讲话仍需等待模型加载。可设置 `LivePreview: false` 关闭预览；`KeepModelLoaded: false` 时也不做预览。
 
 ## 配置和诊断
 

@@ -14,6 +14,27 @@ namespace CodexVoiceKey
         [StructLayout(LayoutKind.Sequential)] internal struct MouseInput { public int dx, dy; public uint data, flags, time; public UIntPtr extra; }
         [StructLayout(LayoutKind.Explicit)] internal struct InputUnion { [FieldOffset(0)] public KeyboardInput keyboard; [FieldOffset(0)] public MouseInput mouse; }
         [StructLayout(LayoutKind.Sequential)] internal struct Input { public uint type; public InputUnion data; }
+        [StructLayout(LayoutKind.Sequential)] internal struct GuiThreadInfo
+        {
+            public uint size, flags;
+            public IntPtr active, focus, capture, menuOwner, moveSize, caret;
+            public int left, top, right, bottom;
+        }
+
+        internal static IntPtr FocusedControl(IntPtr window)
+        {
+            uint process;
+            uint thread = GetWindowThreadProcessId(window, out process);
+            GuiThreadInfo info = new GuiThreadInfo();
+            info.size = (uint)Marshal.SizeOf(typeof(GuiThreadInfo));
+            return thread != 0 && GetGUIThreadInfo(thread, ref info) ? info.focus : IntPtr.Zero;
+        }
+
+        internal static bool ModifiersDown()
+        {
+            return GetAsyncKeyState(0x11) < 0 || GetAsyncKeyState(0x12) < 0 || GetAsyncKeyState(0x10) < 0 ||
+                GetAsyncKeyState(0x5B) < 0 || GetAsyncKeyState(0x5C) < 0;
+        }
 
         private static Input MakeKey(int key, bool down)
         {
@@ -37,6 +58,7 @@ namespace CodexVoiceKey
         [DllImport("user32.dll")] internal static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+        [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, Input[] input, int size);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr GetModuleHandle(string name);
     }

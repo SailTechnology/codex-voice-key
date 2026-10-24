@@ -8,12 +8,14 @@ namespace CodexVoiceKey
     {
         public string Hotkey { get; set; }
         public string[] TargetProcesses { get; set; }
+        public bool AllApplications { get; set; }
         public string HandyPath { get; set; }
         public string ModelId { get; set; }
         public string Microphone { get; set; }
         public bool PlaySounds { get; set; }
         public bool KeepModelLoaded { get; set; }
         public int ModelIdleSeconds { get; set; }
+        public bool LivePreview { get; set; }
         public bool KeepRecordings { get; set; }
         public int MaxRecordingSeconds { get; set; }
         public int TranscriptionTimeoutSeconds { get; set; }
@@ -29,6 +31,7 @@ namespace CodexVoiceKey
             PlaySounds = true;
             KeepModelLoaded = true;
             ModelIdleSeconds = 60;
+            LivePreview = true;
             KeepRecordings = false;
             MaxRecordingSeconds = 120;
             TranscriptionTimeoutSeconds = 120;
@@ -48,7 +51,8 @@ namespace CodexVoiceKey
         public void Validate()
         {
             HotkeyBinding.Parse(Hotkey);
-            if (TargetProcesses == null || TargetProcesses.Length == 0)
+            if (AllApplications && TargetProcesses == null) TargetProcesses = new string[0];
+            if (TargetProcesses == null || (!AllApplications && TargetProcesses.Length == 0))
                 throw new InvalidDataException("TargetProcesses must contain at least one process name.");
             foreach (string name in TargetProcesses)
                 if (String.IsNullOrWhiteSpace(name) || name.IndexOfAny(new char[] { '/', '\\', ':' }) >= 0)

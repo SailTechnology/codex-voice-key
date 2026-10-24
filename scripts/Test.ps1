@@ -19,23 +19,30 @@ foreach ($scriptFile in @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scrip
 }
 if (-not $SkipInstallTest) {
     $installPath = Join-Path $testRoot ('install with spaces ' + [Guid]::NewGuid().ToString('N'))
-    & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -Hotkey 'Ctrl+B' -SkipBackend -NoStart -NoStartup -NoSkill
+    & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -Hotkey 'Ctrl+B' -AllApplications -SkipBackend -NoStart -NoStartup -NoSkill
     & (Join-Path $PSScriptRoot 'Doctor.ps1') -InstallDirectory $installPath | Out-Host
     & (Join-Path $PSScriptRoot 'Set-Hotkey.ps1') -InstallDirectory $installPath -Hotkey 'MouseX1' -NoRestart
     $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Hotkey -ne 'MouseX1') { throw 'Hotkey setting was not saved.' }
+    if ($settings.AllApplications -ne $true -or $settings.LivePreview -ne $true) { throw 'Global dictation or live-preview settings were not saved.' }
     # Simulate upgrading a 1.0 configuration that predates resident inference.
     $settings.PSObject.Properties.Remove('KeepModelLoaded')
+    $settings.PSObject.Properties.Remove('LivePreview')
     Write-VoiceJson -Path (Join-Path $installPath 'config.json') -Value $settings
     & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -SkipBackend -NoStart -NoStartup -NoSkill
     $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.Hotkey -ne 'MouseX1') { throw 'Upgrade overwrote the existing hotkey.' }
     if ($settings.KeepModelLoaded -ne $true) { throw 'Upgrade did not add the new resident-model default.' }
+    if ($settings.LivePreview -ne $true) { throw 'Upgrade did not add live-preview defaults.' }
+    if ($settings.AllApplications -ne $true) { throw 'Upgrade disabled global dictation.' }
     $settings.KeepModelLoaded = $false
+    $settings.LivePreview = $false
+    $settings.AllApplications = $false
     Write-VoiceJson -Path (Join-Path $installPath 'config.json') -Value $settings
     & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -SkipBackend -NoStart -NoStartup -NoSkill
     $settings = Get-Content -LiteralPath (Join-Path $installPath 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($settings.KeepModelLoaded -ne $false) { throw 'Upgrade reenabled an explicitly disabled resident model.' }
+    if ($settings.LivePreview -ne $false -or $settings.AllApplications -ne $false) { throw 'Upgrade overwrote explicitly disabled preview or global scope.' }
     & (Join-Path $PSScriptRoot 'Uninstall.ps1') -InstallDirectory $installPath
     if (Test-Path -LiteralPath (Join-Path $installPath 'CodexVoiceKey.exe')) { throw 'Uninstall left the executable.' }
     if (-not (Test-Path -LiteralPath (Join-Path $installPath 'config.json'))) { throw 'Uninstall removed user configuration.' }

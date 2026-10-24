@@ -35,18 +35,23 @@ namespace CodexVoiceKey
 
         internal static void Run(Action<bool, string> check)
         {
+            int starts = 0;
             Func<ProcessStartInfo> start = delegate {
+                starts++;
                 return new ProcessStartInfo { FileName = Process.GetCurrentProcess().MainModule.FileName, Arguments = "--fake-asr-worker" };
             };
             int workerPid;
             using (ResidentTranscriber client = new ResidentTranscriber(start, 5000, delegate { }))
             {
+                string preview;
+                check(!client.TryPreview("not-loaded.wav", out preview) && starts == 0, "Optional previews never load an extra model");
                 client.WarmUp();
                 string first = client.Transcribe(Path.Combine(Path.GetTempPath(), "语音 with spaces.wav"));
                 workerPid = Int32.Parse(first.Substring(first.LastIndexOf('=') + 1));
                 string second = client.Transcribe(Path.Combine(Path.GetTempPath(), "second.wav"));
                 check(first.Contains("中文 English 语音 with spaces.wav"), "Resident pipe preserves UTF-8 and spaces");
                 check(second.EndsWith("pid=" + workerPid), "Consecutive utterances reuse the same worker");
+                check(client.TryPreview("partial.wav", out preview) && preview.EndsWith("pid=" + workerPid), "Preview and final recognition use the same worker");
                 check(client.Transcribe("stderr.wav").Contains("stderr.wav"), "Large stderr cannot deadlock transcription");
                 check(!client.ReleaseIfIdle(1), "Model is kept for the next immediate utterance");
                 Thread.Sleep(1100);
@@ -61,6 +66,8 @@ namespace CodexVoiceKey
                 Thread.Sleep(1100);
                 Stopwatch idleCall = Stopwatch.StartNew();
                 check(!client.ReleaseIfIdle(1) && idleCall.ElapsedMilliseconds < 200, "Idle cleanup never interrupts or blocks an active transcription");
+                idleCall.Restart();
+                check(!client.TryPreview("skip.wav", out preview) && idleCall.ElapsedMilliseconds < 200, "Previews skip a busy model without queueing behind final recognition");
                 check(inFlight.Result.Contains("slow.wav"), "Active transcription finishes after skipped idle cleanup");
             }
             bool exited;

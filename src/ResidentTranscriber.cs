@@ -55,6 +55,28 @@ namespace CodexVoiceKey
             }
         }
 
+        internal bool TryPreview(string path, out string text)
+        {
+            text = null;
+            if (!Monitor.TryEnter(sync)) return false;
+            try
+            {
+                if (disposed || worker == null || worker.HasExited) return false;
+                Stopwatch elapsed = Stopwatch.StartNew();
+                input.WriteLine(new JavaScriptSerializer().Serialize(new { path = Path.GetFullPath(path) }));
+                Dictionary<string, object> reply = ReadReply(Math.Min(timeoutMs, 8000));
+                object value;
+                if (!reply.TryGetValue("text", out value) || !(value is string))
+                    throw new InvalidDataException("Preview worker returned no text.");
+                text = (string)value;
+                Touch();
+                log("resident preview completed; elapsed_ms=" + elapsed.ElapsedMilliseconds);
+                return true;
+            }
+            catch { Failed(); throw; }
+            finally { Monitor.Exit(sync); }
+        }
+
         private void EnsureStarted()
         {
             if (disposed) throw new ObjectDisposedException("ResidentTranscriber");

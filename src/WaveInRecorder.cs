@@ -24,11 +24,13 @@ namespace CodexVoiceKey
         private IntPtr waveHandle = IntPtr.Zero;
         private WaveFormat format;
         private volatile bool stopping;
-        private bool started;
-        private bool disposed;
+        private volatile bool started;
+        private volatile bool disposed;
+        private volatile float level;
 
         public string DeviceName { get; private set; }
         public string OutputPath { get; private set; }
+        public float Level { get { return level; } }
 
         public WaveInRecorder(string outputPath)
         {
@@ -145,6 +147,15 @@ namespace CodexVoiceKey
             {
                 byte[] chunk = new byte[header.dwBytesRecorded];
                 Marshal.Copy(header.lpData, chunk, 0, chunk.Length);
+                double energy = 0;
+                int measured = 0;
+                for (int i = 0; i + 1 < chunk.Length; i += 16)
+                {
+                    short value = (short)(chunk[i] | (chunk[i + 1] << 8));
+                    energy += (double)value * value;
+                    measured++;
+                }
+                level = measured == 0 ? 0 : (float)Math.Min(1, Math.Sqrt(energy / measured) / 9000.0);
                 lock (sync)
                 {
                     rawAudio.Write(chunk, 0, chunk.Length);
@@ -170,6 +181,24 @@ namespace CodexVoiceKey
             }
 
             PcmWave.Write(OutputPath, source, (int)format.nSamplesPerSec, format.nChannels);
+        }
+
+        internal bool TryWritePreview(string path, int seconds, out double capturedSeconds)
+        {
+            byte[] source;
+            int rate, channels;
+            capturedSeconds = 0;
+            lock (sync)
+            {
+                if (disposed || !started || stopping) return false;
+                rate = (int)format.nSamplesPerSec;
+                channels = format.nChannels;
+                capturedSeconds = rawAudio.Length / (double)(rate * channels * 2);
+                if (capturedSeconds < 1.5) return false;
+                source = PcmWave.ReadTail(rawAudio, rate, channels, seconds);
+            }
+            PcmWave.Write(path, source, rate, channels);
+            return true;
         }
 
         private static string SelectCaptureDevice(out int deviceId)
@@ -210,7 +239,7 @@ namespace CodexVoiceKey
             if (disposed) return;
             disposed = true;
             try { Stop(); } catch { }
-            rawAudio.Dispose();
+            lock (sync) rawAudio.Dispose();
         }
 
         private delegate void WaveInProc(IntPtr device, int message, UIntPtr instance, IntPtr param1, UIntPtr param2);

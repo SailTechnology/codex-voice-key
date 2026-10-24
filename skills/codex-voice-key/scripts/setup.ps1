@@ -2,6 +2,7 @@
     [string]$Hotkey,
     [string]$InstallDirectory,
     [string]$HandyPath,
+    [switch]$AllApplications,
     [string]$ReleaseTag = 'latest',
     [switch]$UseMirror,
     [switch]$SkipBackend,
@@ -39,5 +40,6 @@ $installOptions = @{ SkipBackend=$SkipBackend; NoStart=$NoStart; NoStartup=$NoSt
 if ($Hotkey) { $installOptions.Hotkey = $Hotkey }
 if ($InstallDirectory) { $installOptions.InstallDirectory = $InstallDirectory }
 if ($HandyPath) { $installOptions.HandyPath = $HandyPath }
+if ($PSBoundParameters.ContainsKey('AllApplications')) { $installOptions.AllApplications = $AllApplications }
 & $installer @installOptions
 Write-Host ('Release installed: ' + $release.tag_name)

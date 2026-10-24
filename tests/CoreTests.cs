@@ -70,6 +70,26 @@ namespace CodexVoiceKey
 
                 Check(Marshal.SizeOf(typeof(NativeMethods.Input)) == 40, "Win64 INPUT must include the full union (40 bytes)");
                 Check(Marshal.OffsetOf(typeof(NativeMethods.Input), "data").ToInt32() == 8, "Win64 INPUT union alignment");
+                Check(Marshal.SizeOf(typeof(NativeMethods.GuiThreadInfo)) == 72, "Win64 focused-control structure layout");
+                AppSettings originalSettings = Program.Settings;
+                try
+                {
+                    Program.Settings = new AppSettings { AllApplications = true };
+                    Check(Program.IsTargetWindow(new IntPtr(123)), "Global mode accepts windows outside the Codex process list");
+                    Check(!Program.IsTargetWindow(IntPtr.Zero), "Global mode still requires a foreground window");
+                    Program.Settings.TargetProcesses = new string[0];
+                    Program.Settings.Validate();
+                    Check(Program.Settings.AllApplications, "Global mode does not require a process allowlist");
+                }
+                finally { Program.Settings = originalSettings; }
+                Check(Program.CanPaste(new IntPtr(10), new IntPtr(20), new IntPtr(10), new IntPtr(20)), "Paste into the original window and control");
+                Check(!Program.CanPaste(new IntPtr(10), new IntPtr(20), new IntPtr(11), new IntPtr(20)), "Changing applications leaves text on the clipboard");
+                Check(!Program.CanPaste(new IntPtr(10), new IntPtr(20), new IntPtr(10), new IntPtr(21)), "Changing native input controls does not receive the old dictation");
+                Check(!Program.CanPaste(IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero), "No target never receives pasted text");
+                Check(Program.CanPaste(new IntPtr(10), IntPtr.Zero, new IntPtr(10), new IntPtr(20)), "Apps without native focus details retain window-level paste support");
+                Check(VoiceOverlay.PreviewTail("中文\r\nEnglish") == "中文  English", "Preview handles multiline mixed-language results");
+                string emojiTail = VoiceOverlay.PreviewTail(new string('x', 40) + "😀" + new string('y', 31));
+                Check(emojiTail.StartsWith("…😀") && emojiTail.EndsWith(new string('y', 31)), "Recent preview text never splits an emoji surrogate pair");
                 Check(Program.ExtractJsonText("{\"text\":\"中文 check \\u8bed\\u97f3 \\nEnglish\"}") == "中文 check 语音 \nEnglish", "JSON Unicode, English and escaped newlines");
                 Check(Program.ExtractJsonText("{\"duration\":2}") == String.Empty, "Missing transcript is not hallucinated");
                 byte[] stereo = new byte[48000 * 4];
@@ -84,6 +104,22 @@ namespace CodexVoiceKey
                 bool silent = true; foreach (byte sample in mono) if (sample != 0) silent = false;
                 Check(silent, "Both input channels are mixed with correct frame alignment");
                 Check(PcmWave.Resample(new byte[0], 44100, 2).Length == 0, "Empty capture is valid empty PCM");
+                using (MemoryStream liveAudio = new MemoryStream())
+                {
+                    // Four seconds at 3 Hz, stereo, plus one unfinished byte.
+                    for (short frame = 0; frame < 12; frame++)
+                    {
+                        byte[] left = BitConverter.GetBytes(frame), right = BitConverter.GetBytes((short)-frame);
+                        liveAudio.Write(left, 0, 2); liveAudio.Write(right, 0, 2);
+                    }
+                    liveAudio.WriteByte(0xEE);
+                    byte[] tail = PcmWave.ReadTail(liveAudio, 3, 2, 2);
+                    Check(tail.Length == 24 && BitConverter.ToInt16(tail, 0) == 6 && BitConverter.ToInt16(tail, 22) == -11, "Preview contains only the last two seconds, preserving stereo frames");
+                    Check(liveAudio.Position == 49, "Preview preserves the microphone's append cursor");
+                    Check(PcmWave.ReadTail(liveAudio, 3, 2, 20).Length == 48, "Short previews exclude incomplete trailing frames");
+                    liveAudio.WriteByte(0xDD);
+                    Check(liveAudio.Length == 50 && liveAudio.ToArray()[49] == 0xDD, "Recording continues appending after a preview");
+                }
                 // Integer multiplication overflow used to reject recordings
                 // longer than 8.4 s at 16 kHz, or 2.8 s at 48 kHz.
                 foreach (int rate in new int[] { 16000, 44100, 48000 })

@@ -31,7 +31,11 @@ namespace CodexVoiceKey
             public string Path;
             public Exception StartError;
             public IntPtr Target;
-            public bool Released;
+            public IntPtr Focus;
+            public volatile bool Released;
+            public volatile bool PreviewDisabled;
+            public int PreviewQueued;
+            public long NextPreviewAt;
             public readonly Stopwatch Duration = Stopwatch.StartNew();
         }
 
@@ -65,6 +69,7 @@ namespace CodexVoiceKey
                         modelFound = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "com.pais.handy", "models", Path.GetFileName(Settings.ModelId))),
                         microphones = WaveInRecorder.ListDevices(), configPath = config,
                         targetProcesses = Settings.TargetProcesses, capture = "waveIn", architecture = IntPtr.Size * 8,
+                        allApplications = Settings.AllApplications, livePreview = Settings.LivePreview,
                         keepModelLoaded = Settings.KeepModelLoaded,
                         modelIdleSeconds = Settings.ModelIdleSeconds,
                         nativeLibraryFound = File.Exists(Path.Combine(Path.GetDirectoryName(Settings.HandyPath), "transcribe.dll"))
@@ -101,12 +106,24 @@ namespace CodexVoiceKey
                     VoiceOverlay.Initialize();
                     InputHooks.Start(HotkeyBinding.Parse(Settings.Hotkey));
                     safetyTimer = new System.Windows.Forms.Timer();
-                    safetyTimer.Interval = 500;
+                    safetyTimer.Interval = 250;
                     safetyTimer.Tick += delegate {
                         Session session;
                         lock (Sync) session = current;
                         if (session != null && !session.Released && session.Duration.Elapsed.TotalSeconds >= Settings.MaxRecordingSeconds)
                             EndVoiceCapture("recording time limit");
+                        if (session != null && !session.Released)
+                        {
+                            VoiceOverlay.UpdateLevel(session.Recorder.Level);
+                            long now = Stopwatch.GetTimestamp();
+                            if (Settings.LivePreview && Settings.KeepModelLoaded && !session.PreviewDisabled &&
+                                session.Duration.Elapsed.TotalSeconds >= 2 && now >= session.NextPreviewAt &&
+                                Interlocked.CompareExchange(ref session.PreviewQueued, 1, 0) == 0)
+                            {
+                                session.NextPreviewAt = now + (long)(2.2 * Stopwatch.Frequency);
+                                ThreadPool.QueueUserWorkItem(delegate { PreviewCapture(session); });
+                            }
+                        }
                         ResidentTranscriber cached = resident;
                         if (session == null && cached != null && Settings.ModelIdleSeconds > 0 && Interlocked.CompareExchange(ref idleCheckQueued, 1, 0) == 0)
                             ThreadPool.QueueUserWorkItem(delegate {
@@ -116,7 +133,7 @@ namespace CodexVoiceKey
                             });
                     };
                     safetyTimer.Start();
-                    Log("bridge started; capture=waveIn; hotkey=" + Settings.Hotkey + "; model=" + Settings.ModelId);
+                    Log("bridge started; capture=waveIn; hotkey=" + Settings.Hotkey + "; scope=" + (Settings.AllApplications ? "all" : "targets") + "; preview=" + Settings.LivePreview + "; model=" + Settings.ModelId);
                     Application.Run(new ApplicationContext());
                     safetyTimer.Dispose();
                 }
@@ -139,10 +156,11 @@ namespace CodexVoiceKey
             return args[index + 1];
         }
 
-        internal static bool IsCodexForeground() { return IsTargetWindow(NativeMethods.GetForegroundWindow()); }
+        internal static bool IsEligibleForeground() { return IsTargetWindow(NativeMethods.GetForegroundWindow()); }
         internal static bool IsTargetWindow(IntPtr window)
         {
             if (window == IntPtr.Zero) return false;
+            if (Settings.AllApplications) return true;
             try
             {
                 uint id; NativeMethods.GetWindowThreadProcessId(window, out id);
@@ -160,10 +178,11 @@ namespace CodexVoiceKey
             Session session;
             lock (Sync)
             {
-                if (!IsCodexForeground()) return;
+                if (!IsEligibleForeground()) return;
                 if (processing) { VoiceOverlay.ShowInfo("上一句还在转写", 1200); return; }
                 session = new Session();
                 session.Target = NativeMethods.GetForegroundWindow();
+                session.Focus = NativeMethods.FocusedControl(session.Target);
                 session.Path = Path.Combine(DataDirectory, "recordings", Guid.NewGuid().ToString("N") + ".wav");
                 session.Recorder = new WaveInRecorder(session.Path);
                 processing = true;
@@ -233,10 +252,12 @@ namespace CodexVoiceKey
                     string text = Transcribe(session.Path);
                     if (String.IsNullOrWhiteSpace(text)) { VoiceOverlay.ShowError("没有识别到语音"); return; }
                     stage = "paste";
-                    bool pasted = PasteIntoTarget(text, session.Target);
+                    bool copied;
+                    bool pasted = PasteIntoTarget(text, session.Target, session.Focus, out copied);
                     Log("transcription completed; characters=" + text.Length + "; pasted=" + pasted);
                     if (pasted) VoiceOverlay.ShowSuccess("已经放进输入框");
-                    else VoiceOverlay.ShowCopied("已经识别好了");
+                    else if (copied) VoiceOverlay.ShowCopied("已经识别好了");
+                    else VoiceOverlay.ShowError("剪贴板忙，请重试");
                 }
                 catch (Exception error)
                 {
@@ -253,6 +274,37 @@ namespace CodexVoiceKey
                     session.Ready.Dispose();
                 }
             });
+        }
+
+        private static void PreviewCapture(Session session)
+        {
+            string path = session.Path + ".preview.wav";
+            try
+            {
+                if (session.Released) return;
+                double seconds;
+                if (!session.Recorder.TryWritePreview(path, 12, out seconds) || session.Released) return;
+                string text;
+                // An optional preview never starts a second model or invokes
+                // the slower CLI fallback. Final recognition has priority.
+                if (GetResident().TryPreview(path, out text) && !String.IsNullOrWhiteSpace(text))
+                {
+                    lock (Sync)
+                        if (current == session && !session.Released)
+                            VoiceOverlay.ShowPreview(text);
+                    Log("live preview completed; captured_seconds=" + seconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + "; characters=" + text.Length);
+                }
+            }
+            catch (Exception error)
+            {
+                session.PreviewDisabled = true;
+                Log("live preview unavailable; final transcription remains enabled: " + error.GetType().Name);
+            }
+            finally
+            {
+                try { if (File.Exists(path)) File.Delete(path); } catch { }
+                Interlocked.Exchange(ref session.PreviewQueued, 0);
+            }
         }
 
         internal static string Transcribe(string path)
@@ -323,16 +375,29 @@ namespace CodexVoiceKey
             return text as string ?? String.Empty;
         }
 
-        private static bool PasteIntoTarget(string text, IntPtr target)
+        internal static bool CanPaste(IntPtr target, IntPtr focus, IntPtr foreground, IntPtr currentFocus)
+        {
+            return target != IntPtr.Zero && target == foreground &&
+                (focus == IntPtr.Zero || focus == currentFocus);
+        }
+
+        private static bool PasteIntoTarget(string text, IntPtr target, IntPtr focus, out bool copied)
         {
             bool pasted = false;
+            bool clipboardReady = false;
             Thread thread = new Thread(delegate() {
                 for (int attempt = 0; attempt < 6; attempt++)
                 {
                     try
                     {
                         Clipboard.SetText(text);
-                        if (NativeMethods.GetForegroundWindow() == target && IsTargetWindow(target))
+                        clipboardReady = true;
+                        // Do not turn Ctrl+V into Ctrl+Alt+V or Ctrl+Shift+V
+                        // while the user is still releasing the voice shortcut.
+                        int wait = 0;
+                        while (NativeMethods.ModifiersDown() && wait++ < 50) Thread.Sleep(20);
+                        if (NativeMethods.ModifiersDown()) return;
+                        if (CanPaste(target, focus, NativeMethods.GetForegroundWindow(), NativeMethods.FocusedControl(target)) && IsTargetWindow(target))
                         { NativeMethods.SendPaste(); pasted = true; }
                         return;
                     }
@@ -344,6 +409,7 @@ namespace CodexVoiceKey
             thread.IsBackground = true;
             thread.Start();
             thread.Join(5000);
+            copied = clipboardReady;
             return pasted;
         }
 

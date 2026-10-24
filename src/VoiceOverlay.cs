@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -19,9 +20,11 @@ namespace CodexVoiceKey
         }
 
         public static void ShowRecording() { Dispatch(delegate { form.SetRecording(); }); }
+        public static void UpdateLevel(float level) { Dispatch(delegate { form.SetLevel(level); }); }
+        public static void ShowPreview(string text) { Dispatch(delegate { form.SetPreview(text); }); }
         public static void ShowTranscribing() { Dispatch(delegate { form.SetTranscribing(); }); }
-        public static void ShowSuccess(string message) { Dispatch(delegate { form.SetSuccess(message, 1050); }); }
-        public static void ShowCopied(string message) { Dispatch(delegate { form.SetInfo(message, "已经留在剪贴板里", 1800); }); }
+        public static void ShowSuccess(string message) { Dispatch(delegate { form.SetSuccess(message, 1450); }); }
+        public static void ShowCopied(string message) { Dispatch(delegate { form.SetInfo(message, "已复制，回到输入框按 Ctrl+V", 2400); }); }
         public static void ShowInfo(string message, int milliseconds) { Dispatch(delegate { form.SetInfo(message, "正在处理上一句", milliseconds); }); }
         public static void ShowError(string message) { Dispatch(delegate { form.SetError(message, 2400); }); }
 
@@ -37,6 +40,13 @@ namespace CodexVoiceKey
         }
 
         private enum OverlayMode { Hidden, Recording, Transcribing, Success, Error, Info }
+
+        internal static string PreviewTail(string text)
+        {
+            string clean = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            int[] elements = StringInfo.ParseCombiningCharacters(clean);
+            return elements.Length <= 32 ? clean : "…" + clean.Substring(elements[elements.Length - 32]);
+        }
 
         private sealed class OverlayForm : Form
         {
@@ -63,6 +73,23 @@ namespace CodexVoiceKey
             private int frameWidth = OverlayWidth;
             private int frameHeight = OverlayHeight;
             private IntPtr anchorWindow;
+            private string previewText = String.Empty;
+            private float levelTarget, displayLevel;
+            private int phraseOffset;
+            private static readonly Random RandomPhrase = new Random();
+            private static readonly string[] ListeningLines = {
+                "小耳鳍就位，开讲吧", "博士的小本本翻开啦", "你的灵感，我接住啦", "慢慢说，我有在听哦",
+                "捕捉到一颗新想法", "嗯嗯，继续说", "水跃鱼认真听讲中", "正在打捞你的灵感", "耳鳍竖好啦", "我来帮你记下来"
+            };
+            private static readonly string[] ThinkingLines = {
+                "博士正在整理笔记", "给你的灵感排排队", "文字小队，集合！", "小本本沙沙作响", "把声音变成小字条", "马上就整理好啦"
+            };
+            private static readonly string[] HappyLines = {
+                "这一句，稳稳接住啦", "小本本又多了一页", "博士给你比个耶", "文字已安全着陆", "灵感收集成功", "今天也高效了一点点"
+            };
+            private static readonly string[] RetryLines = {
+                "耳鳍抖一抖，再试一次", "小博士还在这儿呢", "慢慢来，我们再试一次", "整理一下小本本，再来"
+            };
 
             public OverlayForm()
             {
@@ -83,6 +110,7 @@ namespace CodexVoiceKey
                         HideOverlay();
                         return;
                     }
+                    displayLevel += (levelTarget - displayLevel) * 0.26f;
                     long now = Stopwatch.GetTimestamp();
                     if (now - lastRaisedAt >= Stopwatch.Frequency / 2)
                     {
@@ -107,10 +135,13 @@ namespace CodexVoiceKey
 
             public void SetRecording()
             {
-                SelectCodexScreen();
+                SelectAnchorScreen();
                 mode = OverlayMode.Recording;
                 title = "正在听你说";
                 subtitle = "松开 " + Program.Settings.Hotkey + " 结束";
+                previewText = String.Empty;
+                levelTarget = displayLevel = 0;
+                phraseOffset = RandomPhrase.Next(1000);
                 hideAt = 0;
                 elapsed.Restart();
                 Present();
@@ -121,6 +152,8 @@ namespace CodexVoiceKey
                 mode = OverlayMode.Transcribing;
                 title = "正在整理文字";
                 subtitle = "中文 / English · 本地识别";
+                previewText = String.Empty;
+                phraseOffset = RandomPhrase.Next(1000);
                 hideAt = 0;
                 elapsed.Restart();
                 Present();
@@ -130,7 +163,7 @@ namespace CodexVoiceKey
             {
                 mode = OverlayMode.Success;
                 title = message;
-                subtitle = "这一句完成了";
+                subtitle = HappyLines[RandomPhrase.Next(HappyLines.Length)];
                 hideAt = Stopwatch.GetTimestamp() + MillisecondsToTicks(milliseconds);
                 elapsed.Restart();
                 Present();
@@ -150,10 +183,19 @@ namespace CodexVoiceKey
             {
                 mode = OverlayMode.Error;
                 title = message;
-                subtitle = "调整一下再试";
+                subtitle = RetryLines[RandomPhrase.Next(RetryLines.Length)];
                 hideAt = Stopwatch.GetTimestamp() + MillisecondsToTicks(milliseconds);
                 elapsed.Restart();
                 Present();
+            }
+
+            public void SetLevel(float level) { levelTarget = Math.Max(0, Math.Min(1, level)); }
+
+            public void SetPreview(string text)
+            {
+                if (mode != OverlayMode.Recording || String.IsNullOrWhiteSpace(text)) return;
+                previewText = PreviewTail(text);
+                RenderLayeredFrame();
             }
 
             private void Present()
@@ -183,7 +225,7 @@ namespace CodexVoiceKey
 
             private void PositionOnActiveScreen()
             {
-                if (anchorWindow == IntPtr.Zero || !IsWindow(anchorWindow)) SelectCodexScreen();
+                if (anchorWindow == IntPtr.Zero || !IsWindow(anchorWindow)) SelectAnchorScreen();
                 Screen screen = Screen.FromHandle(anchorWindow != IntPtr.Zero ? anchorWindow : GetForegroundWindow());
                 Rectangle area = screen.WorkingArea;
                 uint dpiX, dpiY;
@@ -194,7 +236,7 @@ namespace CodexVoiceKey
                     renderScale = dpiX / 96f;
                 frameWidth = (int)Math.Round(OverlayWidth * renderScale);
                 frameHeight = (int)Math.Round(OverlayHeight * renderScale);
-                // Center on Codex's display, just above the Windows taskbar.
+                // Keep the capsule on the recording application's display.
                 int x = screen.Bounds.Left + (screen.Bounds.Width - frameWidth) / 2;
                 int y = area.Bottom - frameHeight - (int)Math.Round(Program.Settings.TaskbarGap * renderScale);
                 x = Math.Max(area.Left, Math.Min(x, area.Right - frameWidth));
@@ -202,9 +244,9 @@ namespace CodexVoiceKey
                 Bounds = new Rectangle(x, y, frameWidth, frameHeight);
             }
 
-            private void SelectCodexScreen()
+            private void SelectAnchorScreen()
             {
-                if (Program.IsCodexForeground())
+                if (Program.IsEligibleForeground())
                 {
                     anchorWindow = GetForegroundWindow();
                     return;
@@ -295,14 +337,33 @@ namespace CodexVoiceKey
                 Color accent = GetAccentColor();
                 using (SolidBrush pad = new SolidBrush(Color.FromArgb(235, 244, 239)))
                     g.FillEllipse(pad, 10, 4, 64, 64);
-                PixelDoctor.Draw(g, new Rectangle(6, 4, 72, 64), GetMood(), elapsed.Elapsed.TotalMilliseconds);
+                if (mode == OverlayMode.Recording)
+                {
+                    float ripple = 58 + 5 * displayLevel + (float)Math.Sin(elapsed.Elapsed.TotalSeconds * 2.5);
+                    using (Pen ring = new Pen(Color.FromArgb(25 + (int)(45 * displayLevel), accent), 1f))
+                        g.DrawEllipse(ring, 42 - ripple / 2, 36 - ripple / 2, ripple, ripple);
+                }
+                PixelDoctor.Draw(g, new Rectangle(6, 4, 72, 64), GetMood(), elapsed.Elapsed.TotalMilliseconds, displayLevel);
                 DrawText(g);
                 DrawStatus(g, accent);
             }
 
             private void DrawText(Graphics g)
             {
+                bool preview = mode == OverlayMode.Recording && previewText.Length > 0;
+                int turn = phraseOffset + (int)(elapsed.Elapsed.TotalSeconds / 3.8);
+                string heading = mode == OverlayMode.Recording ? ListeningLines[turn % ListeningLines.Length] :
+                    mode == OverlayMode.Transcribing ? ThinkingLines[turn % ThinkingLines.Length] : title;
+                string detail = subtitle;
+                if (mode == OverlayMode.Recording)
+                {
+                    int seconds = (int)elapsed.Elapsed.TotalSeconds;
+                    string clock = (seconds / 60).ToString("00") + ":" + (seconds % 60).ToString("00");
+                    detail = preview ? (turn % 2 == 0 ? "预览 · 松开填入" : ListeningLines[turn % ListeningLines.Length]) + " · " + clock :
+                        "松开填入 · " + clock + " · " + Program.Settings.Hotkey;
+                }
                 using (Font titleFont = new Font("Microsoft YaHei UI", 13.6f, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (Font previewFont = new Font("Microsoft YaHei UI", 12.3f, FontStyle.Regular, GraphicsUnit.Pixel))
                 using (Font subtitleFont = new Font("Microsoft YaHei UI", 10.7f, FontStyle.Regular, GraphicsUnit.Pixel))
                 using (SolidBrush titleBrush = new SolidBrush(Color.FromArgb(46, 61, 56)))
                 using (SolidBrush subtitleBrush = new SolidBrush(Color.FromArgb(116, 130, 123)))
@@ -310,8 +371,21 @@ namespace CodexVoiceKey
                 {
                     trim.Trimming = StringTrimming.EllipsisCharacter;
                     trim.FormatFlags = StringFormatFlags.NoWrap;
-                    g.DrawString(title, titleFont, titleBrush, new RectangleF(84, 15, 217, 23), trim);
-                    g.DrawString(subtitle, subtitleFont, subtitleBrush, new RectangleF(85, 39, 216, 18), trim);
+                    if (preview)
+                    {
+                        using (StringFormat wrap = new StringFormat())
+                        {
+                            wrap.Trimming = StringTrimming.EllipsisCharacter;
+                            wrap.FormatFlags = StringFormatFlags.LineLimit;
+                            g.DrawString(previewText, previewFont, titleBrush, new RectangleF(84, 9, 217, 36), wrap);
+                        }
+                        g.DrawString(detail, subtitleFont, subtitleBrush, new RectangleF(85, 47, 216, 17), trim);
+                    }
+                    else
+                    {
+                        g.DrawString(heading, titleFont, titleBrush, new RectangleF(84, 15, 217, 23), trim);
+                        g.DrawString(detail, subtitleFont, subtitleBrush, new RectangleF(85, 39, 216, 18), trim);
+                    }
                 }
             }
 
@@ -328,7 +402,7 @@ namespace CodexVoiceKey
                         wave.EndCap = LineCap.Round;
                         for (int i = 0; i < 5; i++)
                         {
-                            float h = (float)(3 + 8 * Math.Abs(Math.Sin(seconds * 4.2 + i * 0.85)));
+                            float h = (float)(3 + (2 + 17 * displayLevel) * (0.35 + 0.65 * Math.Abs(Math.Sin(seconds * 4.2 + i * 0.85))));
                             float x = 312 + i * 4;
                             g.DrawLine(wave, x, 36 - h / 2, x, 36 + h / 2);
                         }

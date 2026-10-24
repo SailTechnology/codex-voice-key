@@ -71,8 +71,8 @@ namespace CodexVoiceKey
             try
             {
                 InputDecision decision = binding.Kind == BindingKind.Copilot
-                    ? copilot.Process((int)data.key, down, Program.IsCodexForeground())
-                    : hold.Process(BindingKind.Keyboard, (int)data.key, down, ReadModifiers(), Program.IsCodexForeground());
+                    ? copilot.Process((int)data.key, down, Program.IsEligibleForeground())
+                    : hold.Process(BindingKind.Keyboard, (int)data.key, down, ReadModifiers(), Program.IsEligibleForeground());
                 if (Apply(decision)) return new IntPtr(1);
             }
             catch (Exception error) { Program.Log("keyboard hook failed: " + error.Message); }
@@ -91,7 +91,7 @@ namespace CodexVoiceKey
             else return NativeMethods.CallNextHookEx(mouseHook, code, message, pointer);
             try
             {
-                if (Apply(hold.Process(BindingKind.Mouse, key, down, ReadModifiers(), Program.IsCodexForeground()))) return new IntPtr(1);
+                if (Apply(hold.Process(BindingKind.Mouse, key, down, ReadModifiers(), Program.IsEligibleForeground()))) return new IntPtr(1);
             }
             catch (Exception error) { Program.Log("mouse hook failed: " + error.Message); }
             return NativeMethods.CallNextHookEx(mouseHook, code, message, pointer);

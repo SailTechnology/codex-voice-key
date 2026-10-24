@@ -2,6 +2,7 @@
     [string]$Hotkey,
     [string]$InstallDirectory,
     [string]$HandyPath,
+    [switch]$AllApplications,
     [switch]$UseMirror,
     [switch]$SkipBackend,
     [switch]$NoStart,
@@ -30,6 +31,7 @@ foreach ($property in $defaults.PSObject.Properties) {
 }
 if ($Hotkey) { $settings.Hotkey = $Hotkey }
 if ($HandyPath) { $settings.HandyPath = [IO.Path]::GetFullPath($HandyPath) }
+if ($PSBoundParameters.ContainsKey('AllApplications')) { $settings.AllApplications = [bool]$AllApplications }
 if (-not $SkipBackend) {
     $backendOutput = @(& (Join-Path $PSScriptRoot 'Initialize-Backend.ps1') -HandyPath $HandyPath -UseMirror:$UseMirror)
     $settings.HandyPath = [string]$backendOutput[-1]
@@ -62,8 +64,8 @@ if (-not $NoSkill) {
     Copy-Item -Path (Join-Path $repoRoot 'skills\codex-voice-key\*') -Destination $skillDestination -Recurse -Force
 }
 Write-VoiceJson -Path (Join-Path $InstallDirectory 'installation.json') -Value ([ordered]@{
-    version='1.1.0'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
+    version='1.2.0'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
 })
 if (-not $NoStart) { Write-Host ('Voice bridge running, PID ' + (Start-VoiceBridge $InstallDirectory)) }
 Write-Host "Installed: $InstallDirectory"
-Write-Host "Hold $($settings.Hotkey) to speak in Codex; release to transcribe."
+Write-Host "Hold $($settings.Hotkey) to speak; release to transcribe. All applications: $($settings.AllApplications)."

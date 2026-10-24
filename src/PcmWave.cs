@@ -5,6 +5,31 @@ namespace CodexVoiceKey
 {
     internal static class PcmWave
     {
+        // Preserve the write cursor so a preview cannot overwrite subsequent
+        // microphone samples. Discard incomplete frames at either boundary.
+        internal static byte[] ReadTail(Stream source, int sampleRate, int channels, int seconds)
+        {
+            if (sampleRate < 1 || channels < 1 || seconds < 1) throw new ArgumentException("Invalid preview format.");
+            int stride = checked(channels * 2);
+            long availableFrames = source.Length / stride;
+            long frames = Math.Min(availableFrames, (long)sampleRate * seconds);
+            byte[] tail = new byte[checked((int)(frames * stride))];
+            long position = source.Position;
+            try
+            {
+                source.Position = (availableFrames - frames) * stride;
+                int read = 0;
+                while (read < tail.Length)
+                {
+                    int count = source.Read(tail, read, tail.Length - read);
+                    if (count == 0) throw new EndOfStreamException("Incomplete preview audio.");
+                    read += count;
+                }
+            }
+            finally { source.Position = position; }
+            return tail;
+        }
+
         internal static byte[] Resample(byte[] source, int sampleRate, int channels)
         {
             if (sampleRate < 1 || channels < 1) throw new ArgumentException("Invalid PCM format.");
