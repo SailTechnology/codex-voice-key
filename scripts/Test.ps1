@@ -47,8 +47,22 @@ if (-not $SkipInstallTest) {
     if ($settings.KeepModelLoaded -ne $false) { throw 'Upgrade reenabled an explicitly disabled resident model.' }
     if ($settings.LivePreview -ne $false -or $settings.AllApplications -ne $false) { throw 'Upgrade overwrote explicitly disabled preview or global scope.' }
     if ($settings.MuteOutputWhileRecording -ne $false) { throw 'Upgrade reenabled explicitly disabled output muting.' }
-    & (Join-Path $PSScriptRoot 'Uninstall.ps1') -InstallDirectory $installPath
+    # Exercise the login task with a unique install path; do not run it or alter
+    # another installation's Startup shortcut. Uninstall must remove this task.
+    $shortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'Codex Voice Key.lnk'
+    $shortcutBefore = if (Test-Path -LiteralPath $shortcutPath) { (Get-FileHash -LiteralPath $shortcutPath).Hash } else { $null }
+    $taskName = Get-VoiceStartupTaskName $installPath
+    try {
+        & (Join-Path $PSScriptRoot 'Install.ps1') -InstallDirectory $installPath -SkipBackend -NoStart -NoSkill
+        $task = Get-ScheduledTask -TaskName $taskName
+        if ($task.Actions[0].Execute -ne (Join-Path $installPath 'CodexVoiceKey.exe') -or
+            $task.Actions[0].Arguments -ne ('--config "' + (Join-Path $installPath 'config.json') + '"')) { throw 'Login task does not point to its own executable/configuration.' }
+        if ($task.Principal.RunLevel -ne 'Limited' -or $task.Triggers.Count -ne 1) { throw 'Login task must use normal user privileges and a single trigger.' }
+        $shortcutAfter = if (Test-Path -LiteralPath $shortcutPath) { (Get-FileHash -LiteralPath $shortcutPath).Hash } else { $null }
+        if ($shortcutBefore -ne $shortcutAfter) { throw "Installation changed another installation's Startup shortcut." }
+    } finally { & (Join-Path $PSScriptRoot 'Uninstall.ps1') -InstallDirectory $installPath }
+    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw 'Uninstall left the login task.' }
     if (Test-Path -LiteralPath (Join-Path $installPath 'CodexVoiceKey.exe')) { throw 'Uninstall left the executable.' }
     if (-not (Test-Path -LiteralPath (Join-Path $installPath 'config.json'))) { throw 'Uninstall removed user configuration.' }
-    Write-Output 'PASS: install, diagnosis, rebind, upgrade and uninstall in an isolated directory.'
+    Write-Output 'PASS: install, diagnosis, rebind, upgrade, login-task ownership and uninstall in an isolated directory.'
 }

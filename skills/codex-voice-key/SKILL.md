@@ -21,6 +21,8 @@ When the user requests WeChat, browsers, other apps or all input boxes, pass `-A
 
 First installation downloads Handy 0.9.8 and a roughly 1.5 GB model. `-UseMirror` chooses hf-mirror.com for the model download. Existing compatible Handy/model files are reused. Installation enables login startup and starts the bridge; `-NoStartup` and `-NoStart` disable those steps when requested. Microphone permission may need enabling in Windows settings.
 
+When setup runs through a packaged app with redirected AppData access, the installer uses a temporary normal-user scheduled task to install outside that file view. It reuses the existing backend/model, preserves configuration and backs up the previous private installation after success. The temporary task is removed. Login startup uses a normal-user logon task with explicit executable/config paths; a Startup shortcut is the fallback if task registration is unavailable. No model loads at login.
+
 Use this skill for Windows. The bridge is not a macOS/Linux build and is not a cloud ASR service.
 
 ## Configure an existing installation
@@ -45,6 +47,8 @@ For a custom installation location, pass `-InstallDirectory` to the management s
 ## Diagnose
 
 Run `Doctor.ps1` first. Check the configured binding, target process name, microphone list, backend path and bridge log. A successful process start or visual preview does not prove microphone recognition. If testing speech is needed, use a user-provided recording or ask them to hold the chosen key and speak in Codex. Keep recordings and transcript content local.
+
+For a shortcut that stops working after reboot, compare `installationContext.physicalConfig`, `physicalExecutable`, `shadowedInstallation`, the startup action and the running process. MSIX child processes can see redirected AppData files even without package identity. A program can appear installed inside Codex while login sees no config/model and an older build silently uses the default shortcut. Upgrade with v1.3.1 or later through `Install.ps1`; do not fix only the visible shortcut or assume a new diagnose process reports the settings used by an existing process. Check the startup log for the actual version, executable, config path and binding. Verify from a normal Windows process as well as Codex; do not reboot the user's computer automatically.
 
 Version 1.1.0 fixes an audio-resampling integer overflow that caused longer captures to fail before recognition. If older logs contain `startIndex` out-of-range errors while short phrases work, upgrade the bridge. Current pipeline errors include `stage=capture`, `recognition`, or `paste` and a stack trace; diagnose the failing stage before changing the model.
 

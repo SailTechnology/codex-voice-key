@@ -12,6 +12,11 @@ foreach ($relativePath in $manifest.files) {
 }
 [void](Stop-VoiceBridge $InstallDirectory)
 $executable = Join-Path $InstallDirectory 'CodexVoiceKey.exe'
+$taskName = Get-VoiceStartupTaskName $InstallDirectory
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($task -and @($task.Actions | Where-Object { $_.Execute -eq $executable }).Count -gt 0) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+}
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'Codex Voice Key.lnk'
 if (Test-Path -LiteralPath $shortcutPath) {
     $shellObject = New-Object -ComObject WScript.Shell

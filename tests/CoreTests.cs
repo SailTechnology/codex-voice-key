@@ -18,6 +18,10 @@ namespace CodexVoiceKey
             if (Array.IndexOf(args, "--fake-asr-worker") >= 0) return ResidentTests.FakeWorker();
             try
             {
+                string missingConfig = Path.Combine(Path.GetTempPath(), "codex-voice-missing-" + Guid.NewGuid().ToString("N") + ".json");
+                bool missingRejected = false;
+                try { AppSettings.Load(missingConfig); } catch (FileNotFoundException) { missingRejected = true; }
+                Check(missingRejected, "Missing startup configuration never silently changes the voice shortcut");
                 HotkeyBinding ctrlB = HotkeyBinding.Parse("Ctrl+B");
                 Check(ctrlB.Key == 0x42 && ctrlB.Modifiers == KeyModifiers.Ctrl, "Ctrl+B binding");
                 Check(HotkeyBinding.Parse("MouseMiddle").Kind == BindingKind.Mouse, "Middle mouse binding");

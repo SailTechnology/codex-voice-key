@@ -42,9 +42,10 @@ namespace CodexVoiceKey
 
         public static AppSettings Load(string path)
         {
-            AppSettings settings = File.Exists(path)
-                ? new JavaScriptSerializer().Deserialize<AppSettings>(File.ReadAllText(path))
-                : new AppSettings();
+            // A missing login-time config must not silently change the shortcut,
+            // application scope or backend to constructor defaults.
+            if (!File.Exists(path)) throw new FileNotFoundException("The voice configuration is missing. Run the installer to repair startup.", path);
+            AppSettings settings = new JavaScriptSerializer().Deserialize<AppSettings>(File.ReadAllText(path));
             if (settings == null) throw new InvalidDataException("The configuration must be a JSON object.");
             settings.Validate();
             return settings;

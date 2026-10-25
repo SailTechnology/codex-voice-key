@@ -45,7 +45,8 @@ namespace CodexVoiceKey
         {
             try
             {
-                string config = Argument(args, "--config") ?? Path.Combine(DataDirectory, "config.json");
+                string adjacentConfig = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+                string config = Argument(args, "--config") ?? (File.Exists(adjacentConfig) ? adjacentConfig : Path.Combine(DataDirectory, "config.json"));
                 config = Path.GetFullPath(config);
                 configPath = config;
                 DataDirectory = Path.GetDirectoryName(config);
@@ -70,7 +71,8 @@ namespace CodexVoiceKey
                 if (diagnose != null)
                 {
                     object report = new {
-                        hotkey = Settings.Hotkey, handyFound = File.Exists(Settings.HandyPath),
+                        version = Application.ProductVersion, executablePath = Application.ExecutablePath,
+                        configFound = File.Exists(config), hotkey = Settings.Hotkey, handyFound = File.Exists(Settings.HandyPath),
                         handyPath = Settings.HandyPath, model = Settings.ModelId,
                         modelFound = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "com.pais.handy", "models", Path.GetFileName(Settings.ModelId))),
                         microphones = WaveInRecorder.ListDevices(), configPath = config,
@@ -144,7 +146,7 @@ namespace CodexVoiceKey
                             });
                     };
                     safetyTimer.Start();
-                    Log("bridge started; capture=waveIn; hotkey=" + Settings.Hotkey + "; scope=" + (Settings.AllApplications ? "all" : "targets") + "; preview=" + Settings.LivePreview + "; model=" + Settings.ModelId);
+                    Log("bridge started; version=" + Application.ProductVersion + "; pid=" + Process.GetCurrentProcess().Id + "; executable=" + Application.ExecutablePath + "; config=" + configPath + "; capture=waveIn; hotkey=" + Settings.Hotkey + "; scope=" + (Settings.AllApplications ? "all" : "targets") + "; preview=" + Settings.LivePreview + "; model=" + Settings.ModelId);
                     Application.Run(new ApplicationContext());
                     safetyTimer.Dispose();
                 }

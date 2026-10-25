@@ -10,6 +10,9 @@
     [switch]$NoSkill
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
+$installOptions = @{}
+foreach ($entry in $PSBoundParameters.GetEnumerator()) { $installOptions[$entry.Key] = if ($entry.Value -is [Management.Automation.SwitchParameter]) { [bool]$entry.Value } else { $entry.Value } }
+if (Invoke-VoiceUnpackagedInstall -Installer $PSCommandPath -Options $installOptions) { return }
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $InstallDirectory = Get-VoiceInstallDirectory $InstallDirectory
 $systemRoot = [IO.Path]::GetPathRoot($InstallDirectory)
@@ -51,11 +54,36 @@ foreach ($scriptName in $runtimeScripts) { Copy-Item -LiteralPath (Join-Path $PS
 if (-not $NoStartup) {
     $startupDirectory = [Environment]::GetFolderPath('Startup')
     $shellObject = New-Object -ComObject WScript.Shell
-    $shortcut = $shellObject.CreateShortcut((Join-Path $startupDirectory 'Codex Voice Key.lnk'))
-    $shortcut.TargetPath = $installedExe
-    $shortcut.Arguments = '--config "' + $configPath + '"'
-    $shortcut.WorkingDirectory = $InstallDirectory
-    $shortcut.Save()
+    $shortcutPath = Join-Path $startupDirectory 'Codex Voice Key.lnk'
+    $startupArguments = '--config "' + $configPath + '"'
+    try {
+        $taskName = Get-VoiceStartupTaskName $InstallDirectory
+        $userName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $principal = New-ScheduledTaskPrincipal -UserId $userName -LogonType Interactive -RunLevel Limited
+        $action = New-ScheduledTaskAction -Execute $installedExe -Argument $startupArguments -WorkingDirectory $InstallDirectory
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userName
+        $taskSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $taskSettings -Description 'Local push-to-talk voice input; starts at user login without loading the speech model.' -Force | Out-Null
+        if (Test-Path -LiteralPath $shortcutPath) {
+            $shortcut = $shellObject.CreateShortcut($shortcutPath)
+            if ($shortcut.Arguments -eq $startupArguments) { Remove-Item -LiteralPath $shortcutPath -Force }
+        }
+    } catch {
+        Write-Warning ('Login task unavailable; using a Startup shortcut: ' + $_.Exception.Message)
+        $shortcut = $shellObject.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $installedExe
+        $shortcut.Arguments = $startupArguments
+        $shortcut.WorkingDirectory = $InstallDirectory
+        $shortcut.Save()
+    }
+    # Replace the old duplicate Run entry only when this installation owns it.
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if (Test-Path -LiteralPath $runKey) {
+        $oldRun = (Get-Item -LiteralPath $runKey).GetValue('CodexVoiceKey')
+        if ($oldRun -and $oldRun.IndexOf($installedExe, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            Remove-ItemProperty -LiteralPath $runKey -Name 'CodexVoiceKey'
+        }
+    }
 }
 if (-not $NoSkill) {
     $skillRoot = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME 'skills' } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) '.codex\skills' }
@@ -64,7 +92,7 @@ if (-not $NoSkill) {
     Copy-Item -Path (Join-Path $repoRoot 'skills\codex-voice-key\*') -Destination $skillDestination -Recurse -Force
 }
 Write-VoiceJson -Path (Join-Path $InstallDirectory 'installation.json') -Value ([ordered]@{
-    version='1.3.0'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
+    version='1.3.1'; installedAt=(Get-Date -Format o); files=@('CodexVoiceKey.exe','installation.json') + @($runtimeScripts | ForEach-Object { 'scripts\' + $_ })
 })
 if (-not $NoStart) { Write-Host ('Voice bridge running, PID ' + (Start-VoiceBridge $InstallDirectory)) }
 Write-Host "Installed: $InstallDirectory"
